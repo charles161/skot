@@ -81,7 +81,7 @@ export function MyBoardsDialog({ open, ...list }: MyBoardsDialogProps) {
             My boards
           </DialogTitle>
           <DialogDescription className="text-xs leading-relaxed">
-            Saved in this browser as you edit, newest first.
+            Saved in this browser, newest first. A board&apos;s link only opens here: to send one, use Copy share link.
           </DialogDescription>
         </DialogHeader>
         <Boards {...list} />

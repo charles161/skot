@@ -19,6 +19,7 @@ import { formatRoomHash } from "@/lib/jev/room-auth";
 import type { StoredBoardSnapshot } from "@/lib/jev/sync-validation";
 import { sanitizeExportFilename } from "@/lib/jev/svg-export";
 
+const OWN_COPY = "This is your own copy of the shared board. Your changes don't reach whoever sent it.";
 export const OPEN_FAILED_MESSAGE = "Could not open that board";
 const NOTICE_MS = 5000;
 
@@ -50,7 +51,7 @@ export function useImportFragment(onNotice: (notice: BoardNotice) => void): bool
       .then((roomHash) => {
         if (cancelled) return;
         replaceImportAddress(roomHash);
-        if (!roomHash) onNotice({ tone: "error", text: OPEN_FAILED_MESSAGE });
+        onNotice(roomHash ? { tone: "info", text: OWN_COPY } : { tone: "error", text: OPEN_FAILED_MESSAGE });
         setPendingHash(null);
       });
     return () => {

@@ -120,6 +120,22 @@ function practiceStarted(storage: StorageLike, id: string): number | null {
   }
 }
 
+const NAME_LABELS = 3;
+const NAME_CHARS = 80;
+
+/** Untitled boards would all look alike: they go by what is on them. */
+function boardName(data: BoardData | null): string {
+  const title = typeof data?.boardTitle === "string" ? data.boardTitle.trim() : "";
+  if (title && title !== DEFAULT_BOARD_TITLE) return title;
+  const labels: string[] = [];
+  for (const element of (data?.elements ?? []) as Array<{ label?: unknown } | null>) {
+    const label = typeof element?.label === "string" ? element.label.replace(/\s+/g, " ").trim() : "";
+    if (label) labels.push(label);
+    if (labels.length === NAME_LABELS) break;
+  }
+  return labels.join(", ").slice(0, NAME_CHARS) || DEFAULT_BOARD_TITLE;
+}
+
 export interface BoardSummary {
   id: string;
   title: string;
@@ -154,7 +170,7 @@ export function listBoards(storage: BoardStorage | null, now: number): BoardSumm
       const started = practiceStarted(storage, id);
       boards.push({
         id,
-        title: (typeof data?.boardTitle === "string" && data.boardTitle.trim()) || DEFAULT_BOARD_TITLE,
+        title: boardName(data),
         edited: lastEdited(data, now) ?? (started === null ? null : Math.min(started, now)),
         count: unreadable ? null : (data?.elements.length ?? 0),
         unreadable,

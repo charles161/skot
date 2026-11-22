@@ -480,6 +480,55 @@ def test_board_replace_keeps(page, app, prod_like, evidence):
     assert_no_console_errors(evidence)
 
 
+@check("board-names")
+def test_board_names(page, app, evidence, shot):
+    app.new_board()
+    type_node(app, "Checkout Service")
+    new_from_menu(app)
+    type_node(app, "Holiday Trip")
+    rows = my_boards(page).get_by_role("listitem")
+    names = [t.split("\n")[0].strip() for t in rows.all_inner_texts()]
+    assert names == ["Holiday Trip", "Checkout Service"], "untitled boards look alike: %s" % names
+    shot(page, "names")
+    evidence.note(names=names)
+    assert_no_console_errors(evidence)
+
+
+@check("board-share-copy")
+def test_board_share_copy(page, app, new_page, evidence, shot):
+    page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    app.new_board()
+    type_node(app, "Holiday Trip")
+    open_menu(page, "Copy share link")
+    page.get_by_test_id("board-notice").wait_for(timeout=5000)
+    link = page.evaluate("() => navigator.clipboard.readText()")
+    friend = new_page("friend")
+    friend.context.route(ANALYTICS, lambda r: r.fulfill(status=200, content_type="text/javascript", body=""))
+    friend.set_viewport_size(PHONE)
+    friend.goto(link)
+    notice = friend.get_by_test_id("board-notice").filter(has_text="your own copy")
+    notice.wait_for(timeout=10000)
+    assert notice.get_by_role("status").count() or notice.get_attribute("role") == "status", "not announced"
+    assert fits(friend, notice.bounding_box())
+    friend.wait_for_function(HAS, arg="Holiday Trip", timeout=10000)
+    shot(friend, "shared-copy-phone")
+    evidence.note(said=notice.inner_text())
+    assert_no_console_errors(evidence)
+
+
+@check("board-link-wording")
+def test_board_link_wording(page, app, evidence, shot):
+    app.new_board()
+    page.set_viewport_size(PHONE)
+    dialog = my_boards(page)
+    said = dialog.inner_text()
+    assert "only opens here" in said and "Copy share link" in said, "which link to send is not said: %s" % said
+    assert fits(page, dialog.bounding_box())
+    shot(page, "link-wording-phone")
+    evidence.note(said=said)
+    assert_no_console_errors(evidence)
+
+
 @check("board-unknown")
 def test_board_unknown(page, app, prod_like, evidence, shot):
     mine = app.new_board()

@@ -612,6 +612,24 @@ features:
       - src/components/jev/JevWorkspace.tsx
       - src/components/jev/PracticePicker.tsx
 
+  - id: board-names
+    title: "Untitled boards are named in My boards by what is on them"
+    check: board-names
+    sources:
+      - src/lib/jev/boards.ts
+
+  - id: board-share-copy
+    title: "Whoever opens a share link is told it is their own copy"
+    check: board-share-copy
+    sources:
+      - src/components/jev/BoardFileMenu.tsx
+
+  - id: board-link-wording
+    title: "My boards says a board's link only opens here, and which link to send"
+    check: board-link-wording
+    sources:
+      - src/components/jev/MyBoards.tsx
+
   - id: board-storage-full
     title: "Full storage: no board is evicted, and a board that can't be saved is not left"
     check: board-storage-full

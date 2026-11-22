@@ -143,6 +143,21 @@ describe("boards the live build saved keep working", () => {
     expect(listBoards(storage, NOW).map((b) => b.id)).toContain(id);
   });
 
+  it("an untitled board is named by what is on it", () => {
+    const elements = [{ label: "Checkout Service" }, { label: "" }, { label: "Orders DB" }];
+    const storage = new MemoryStorage({ [boardStorageKey("named")]: board({ boardTitle: "Untitled Sheet", elements }) });
+    expect(listBoards(storage, NOW)[0].title).toBe("Checkout Service, Orders DB");
+  });
+
+  it("a name never replaces a title someone typed, and has an end", () => {
+    const named = [{ label: "x".repeat(500) }];
+    const storage = new MemoryStorage({
+      [boardStorageKey("typed")]: board({ boardTitle: "Roadmap", elements: named, editedAt: NOW }),
+      [boardStorageKey("long")]: board({ boardTitle: "Untitled Sheet", elements: named, editedAt: NOW - 1 }),
+    });
+    expect(listBoards(storage, NOW).map((b) => b.title)).toEqual(["Roadmap", "x".repeat(80)]);
+  });
+
   it("a damaged key can't crash the list's links", () => {
     expect(() => boardPath("\ud800bad")).not.toThrow();
   });
