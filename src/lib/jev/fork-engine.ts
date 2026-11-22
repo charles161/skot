@@ -17,6 +17,7 @@ import {
   SemanticEdge,
   semanticEdgeToArrow,
   SemanticGraph,
+  semanticGraphSchema,
   SemanticNode,
   validateSemanticGraph,
 } from "./semantic-graph";
@@ -1502,7 +1503,7 @@ function makeRoomForSwap(
   });
 }
 
-const rawForkTakeSpecSchema = z.object({
+export const rawForkTakeSpecSchema = z.object({
   archetype: forkArchetypeSchema.optional().default("queue_event_driven"),
   title: z.string().trim().min(2).max(80),
   rationale: z.string().trim().min(6).max(200),
@@ -1510,19 +1511,49 @@ const rawForkTakeSpecSchema = z.object({
   graph: z.unknown(),
 });
 
-const rawForkTakesPayloadSchema = z.object({
+export const rawForkTakesPayloadSchema = z.object({
   takes: z.array(rawForkTakeSpecSchema).length(3),
 });
 
-const rawConstrainedForkTakeSpecSchema = rawForkTakeSpecSchema.extend({
+export const rawConstrainedForkTakeSpecSchema = rawForkTakeSpecSchema.extend({
   buys: z.string().trim().min(4).max(180),
   costs: forkCostLinesSchema,
   failureMode: z.string().trim().min(4).max(160),
 });
 
-const rawConstrainedForkTakesPayloadSchema = z.object({
+export const rawConstrainedForkTakesPayloadSchema = z.object({
   takes: z.array(rawConstrainedForkTakeSpecSchema).length(3),
 });
+
+/** Text that is only displayed. Ids, edge endpoints and enums are never shortened: that would rewire the graph. */
+const DISPLAY_TEXT_KEYS = new Set<PropertyKey>([
+  "title", "rationale", "tradeoffTag", "buys", "failureMode", "text", "summary", "label", "sublabel", "role",
+]);
+
+function shorten(text: string, max: number): string {
+  // By code point, as zod measures max().
+  const head = Array.from(text).slice(0, max - 1).join("");
+  const space = head.lastIndexOf(" ");
+  const kept = space >= max / 2 ? head.slice(0, space) : head;
+  return `${kept.replace(/[\s,;:]+$/, "")}…`;
+}
+
+/** Shortens display text to the maximum `schema` reports for it; every other violation is left to the validator. */
+function shortenOverlongText(schema: z.ZodType, raw: unknown): unknown {
+  const parsed = schema.safeParse(raw);
+  if (parsed.success) return raw;
+  const copy = structuredClone(raw);
+  for (const issue of parsed.error.issues) {
+    if (issue.code !== "too_big" || issue.origin !== "string") continue;
+    const key = issue.path[issue.path.length - 1];
+    if (!DISPLAY_TEXT_KEYS.has(key)) continue;
+    const parent = issue.path
+      .slice(0, -1)
+      .reduce<unknown>((node, step) => (node as Record<PropertyKey, unknown>)[step], copy) as Record<PropertyKey, string>;
+    parent[key] = shorten(parent[key].trim(), Number(issue.maximum));
+  }
+  return copy;
+}
 
 /**
  * The model returns trade-offs flat on each take; validated takes (what the decide route
@@ -1546,6 +1577,7 @@ function flattenValidatedTradeoffs(raw: object): unknown {
 /**
  * Validates model-generated takes. With a stated constraint every take must also carry
  * `buys`, one cost line per axis and a `failureMode`; they land on `take.tradeoffs`.
+ * Over-long display text is shortened: it is no reason to discard three otherwise valid takes.
  */
 export function validateForkTakesPayload(
   raw: unknown,
@@ -1556,9 +1588,8 @@ export function validateForkTakesPayload(
   }
   const pressure = opts.constraint?.pressure;
   const flat = flattenValidatedTradeoffs(raw);
-  const parsed = pressure
-    ? rawConstrainedForkTakesPayloadSchema.safeParse(flat)
-    : rawForkTakesPayloadSchema.safeParse(flat);
+  const payloadSchema = pressure ? rawConstrainedForkTakesPayloadSchema : rawForkTakesPayloadSchema;
+  const parsed = payloadSchema.safeParse(shortenOverlongText(payloadSchema, flat));
   if (!parsed.success) {
     return {
       ok: false,
@@ -1570,7 +1601,7 @@ export function validateForkTakesPayload(
   for (const item of parsed.data.takes as Array<
     z.infer<typeof rawForkTakeSpecSchema> & Partial<z.infer<typeof rawConstrainedForkTakeSpecSchema>>
   >) {
-    const graphCheck = validateSemanticGraph(item.graph);
+    const graphCheck = validateSemanticGraph(shortenOverlongText(semanticGraphSchema, item.graph));
     if (!graphCheck.ok) {
       return { ok: false, error: `Invalid take graph: ${graphCheck.error}` };
     }

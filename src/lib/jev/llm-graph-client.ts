@@ -4,14 +4,25 @@ import {
   parseSemanticGraphJson,
   SEMANTIC_KIND_HINTS,
   SEMANTIC_NODE_KINDS,
+  semanticEdgeSchema,
+  semanticGraphSchema,
+  semanticGroupSchema,
+  semanticNodeSchema,
   type SemanticGraph,
 } from "@/lib/jev/semantic-graph";
 import { ARROW_ENDS } from "@/lib/jev/types";
 import {
+  rawConstrainedForkTakeSpecSchema,
+  rawForkTakesPayloadSchema,
   validateForkTakesPayload,
   type ForkTakeSpec,
 } from "@/lib/jev/fork-engine";
-import { FORK_COST_AXES, FORK_PATTERN_IDS, type ForkConstraint } from "@/lib/jev/fork-constraint";
+import {
+  FORK_COST_AXES,
+  FORK_PATTERN_IDS,
+  forkCostLineSchema,
+  type ForkConstraint,
+} from "@/lib/jev/fork-constraint";
 import {
   constrainMorphSpecToSelection,
   validateMorphSemanticSpec,
@@ -37,7 +48,8 @@ const HAIKU_MODEL = "anthropic/claude-haiku-5.5";
 
 /**
  * The model each gateway route uses, pinned by a unit test. Haiku won the 22 Nov 2026 model eval on the short-output
- * routes; next_options, Fork and generate_graph stay on gpt-4.1-mini because Haiku overruns their length caps.
+ * routes, and on Fork once that prompt stated its schema's limits. next_options and generate_graph stay on
+ * gpt-4.1-mini: Haiku overruns their length caps.
  * Env overrides: AI_GATEWAY_MODEL_<ROUTE> (e.g. AI_GATEWAY_MODEL_MORPH) for one route, AI_GATEWAY_MODEL for all.
  */
 export const LLM_ROUTE_MODELS = {
@@ -46,13 +58,13 @@ export const LLM_ROUTE_MODELS = {
   moves: HAIKU_MODEL,
   morph: HAIKU_MODEL,
   next_options: DEFAULT_AI_GATEWAY_MODEL,
-  fork: DEFAULT_AI_GATEWAY_MODEL,
+  fork: HAIKU_MODEL,
   generate_graph: DEFAULT_AI_GATEWAY_MODEL,
 } as const satisfies Record<string, string>;
 
 export type LlmRoute = keyof typeof LLM_ROUTE_MODELS;
 const LLM_TIMEOUT_MS = 6500;
-/** Three full graphs with trade-offs take gpt-4.1-mini ~8-15 s through the gateway. */
+/** Three full graphs with trade-offs take Haiku 7-10 s through the gateway. */
 const FORK_TIMEOUT_MS = 25000;
 /** A full-board morph is 700-1000 output tokens: Haiku takes 4-7 s through the gateway. */
 export const MORPH_TIMEOUT_MS = 10000;
@@ -66,9 +78,50 @@ const END_GUIDE =
 
 const GRAPH_SYSTEM_PROMPT = `Return ONLY valid JSON matching {"notation":"architecture"|"flowchart"|"sequence"|"state"|"er","summary":string,"nodes":[{"id":string,"label":string,"sublabel"?:string,"kind":${KIND_UNION},"tone"?:${TONE_UNION},"layer"?:number}],"edges":[{"from":string,"to":string,"label"?:string,"dashed"?:boolean,"bidirectional"?:boolean,"startEnd"?:${END_UNION},"endEnd"?:${END_UNION}}],"groups"?:[{"id":string,"label":string,"nodeIds":string[]}]}. ${KIND_GUIDE} ${END_GUIDE} Use groups for regions, VPCs and trust zones. Keep graphs crisp (2-10 nodes).`;
 
-const FORK_SYSTEM_PROMPT = `Return ONLY valid JSON matching {"takes":[{"archetype":"queue_event_driven"|"cache_read_replica"|"gateway_edge_split"|"resilient_mesh","title":string,"rationale":string,"tradeoffTag":string,"graph":{"notation":"architecture","summary":string,"nodes":[{"id":string,"label":string,"sublabel"?:string,"kind":${KIND_UNION},"tone"?:${TONE_UNION}}],"edges":[{"from":string,"to":string,"label"?:string,"dashed"?:boolean}],"groups"?:[{"id":string,"label":string,"nodeIds":string[]}]}}]}. Draw queues, caches, load balancers/CDNs, blob stores, third-party systems and users with their kinds (queue, cache, lb, blob, external, actor). Produce EXACTLY 3 genuinely distinct architectural refactors tailored to the selected nodes. Anything boardGraph already has (its cache, its database, its gateway) is that node: use its exact label instead of adding a second one.`;
+/** A string field as the prompt shows it, with the bounds read off its schema. */
+function promptString(field: z.ZodType, style = ""): string {
+  const { minLength, maxLength } = z.toJSONSchema(field, { io: "input" });
+  return `string (${minLength ? `${minLength}-` : "max "}${maxLength} chars${style && `, ${style}`})`;
+}
+
+function promptItems(key: string, field: z.ZodType): string {
+  const { minItems, maxItems } = z.toJSONSchema(field, { io: "input" });
+  const range = minItems === maxItems ? `exactly ${maxItems}` : minItems ? `${minItems}-${maxItems}` : `max ${maxItems}`;
+  return `(${key}: ${range} items)`;
+}
+
 const COST_AXIS_UNION = FORK_COST_AXES.map((a) => `"${a}"`).join("|");
-const FORK_CONSTRAINT_PROMPT = `${FORK_SYSTEM_PROMPT} The user stated a pressure in "constraint" (pressure, optional target). Make all 3 takes answer it, ranked best first, using real patterns (archetype one of ${FORK_PATTERN_IDS.map((id) => `"${id}"`).join("|")}). Each take MUST also have "buys":string (what it buys against the stated number, phrased as a typical range and marked typical, e.g. "p99 read ≈ 5-20 ms on cache hit vs 50-150 ms DB (typical)"), "costs":[{"axis":${COST_AXIS_UNION},"text":string (under 60 chars),"severity":1|2|3}] with exactly one entry per axis, and "failureMode":string (the new failure mode the take introduces).`;
+const PATTERN_UNION = FORK_PATTERN_IDS.map((id) => `"${id}"`).join("|");
+
+/** Trade-off fields sit before "graph": after that nested object the model loses track of which brace closes the take. */
+function forkPrompt(withPressure: boolean): string {
+  const take = rawConstrainedForkTakeSpecSchema.shape;
+  const graph = semanticGraphSchema.shape;
+  const node = semanticNodeSchema.shape;
+  const edge = semanticEdgeSchema.shape;
+  const group = semanticGroupSchema.shape;
+  const archetypes = withPressure
+    ? PATTERN_UNION
+    : '"queue_event_driven"|"cache_read_replica"|"gateway_edge_split"|"resilient_mesh"';
+  const tradeoffs = withPressure
+    ? `"buys":${promptString(take.buys, "one phrase")},"costs":[{"axis":${COST_AXIS_UNION},"text":${promptString(forkCostLineSchema.shape.text, "one short phrase")},"severity":1|2|3}],"failureMode":${promptString(take.failureMode, "one phrase")},`
+    : "";
+  const sizes = [
+    promptItems("takes", rawForkTakesPayloadSchema.shape.takes),
+    ...(withPressure ? [promptItems("costs", take.costs)] : []),
+    promptItems("nodes", graph.nodes),
+    promptItems("edges", graph.edges),
+    promptItems("groups", graph.groups),
+    promptItems("nodeIds", group.nodeIds),
+  ];
+  const pressure = withPressure
+    ? ' The user stated a pressure in "constraint" (pressure, optional target). Make all 3 takes answer it, ranked best first, using real patterns. Each take MUST have "buys" (what it buys against the stated number, phrased as a typical range and marked typical, e.g. "p99 read ≈ 5-20 ms on cache hit vs 50-150 ms DB (typical)"), "costs" with exactly one entry per axis, and "failureMode" (the new failure mode the take introduces).'
+    : "";
+  return `Return ONLY valid JSON matching {"takes":[{"archetype":${archetypes},"title":${promptString(take.title, "2-6 words")},"rationale":${promptString(take.rationale, "one short sentence")},"tradeoffTag":${promptString(take.tradeoffTag, "2-4 words")},${tradeoffs}"graph":{"notation":"architecture","summary":${promptString(graph.summary, "one short phrase")},"nodes":[{"id":${promptString(node.id)},"label":${promptString(node.label, "1-4 words")},"sublabel"?:${promptString(node.sublabel, "a few words")},"kind":${KIND_UNION},"tone"?:${TONE_UNION}}],"edges":[{"from":${promptString(edge.from, "a node id")},"to":${promptString(edge.to, "a node id")},"label"?:${promptString(edge.label, "1-3 words")},"dashed"?:boolean}],"groups"?:[{"id":${promptString(group.id)},"label":${promptString(group.label, "1-4 words")},"nodeIds":[${promptString(node.id)}]}]}}]}. Array sizes: ${sizes.join(", ")}. Character limits are hard limits. Draw queues, caches, load balancers/CDNs, blob stores, third-party systems and users with their kinds (queue, cache, lb, blob, external, actor). Produce EXACTLY 3 genuinely distinct architectural refactors tailored to the selected nodes. Anything boardGraph already has (its cache, its database, its gateway) is that node: use its exact label instead of adding a second one.${pressure}`;
+}
+
+const FORK_SYSTEM_PROMPT = forkPrompt(false);
+const FORK_CONSTRAINT_PROMPT = forkPrompt(true);
 const CONTEXT_TIMEOUT_MS = 2500;
 
 export interface GatewayAuth {
