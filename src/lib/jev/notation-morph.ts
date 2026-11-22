@@ -21,10 +21,12 @@ import { hasForbiddenObjectKeys, type SerializedBoardGraph } from "./semantic-gr
 import { fragmentLayout } from "./shape-layout";
 import {
   isValidFragmentRange,
+  MAX_LABEL_LENGTH,
   MAX_MORPH_SNAPSHOT_ELEMENTS,
   MAX_MORPH_SNAPSHOT_POINTS,
   MORPH_ACTOR_KINDS,
   MORPH_FRAGMENT_OPERATORS,
+  MAX_SUBLABEL_LENGTH,
   MORPH_FRAGMENT_RANGE_ERROR,
 } from "./sync-validation";
 import type {
@@ -2088,6 +2090,51 @@ function keepBoundaryArrow(
  * preserving a full reversible `MorphGroupRecord` (including original `sketchSnapshot`)
  * on the anchor element. Arrows crossing the selection boundary stay on their own shapes.
  */
+/** Cuts a spec to what storage accepts (morphSemanticSpecSyncSchema): a board that saves must load back. */
+function clampSpecForStorage(spec: MorphSemanticSpec): MorphSemanticSpec {
+  const cut = (text: string, max: number) => text.slice(0, max);
+  const maybe = (text: string | undefined, max: number) => text?.slice(0, max);
+  return {
+    ...spec,
+    summary: cut(spec.summary, 160),
+    actors: spec.actors.slice(0, 32).map((a) => ({ ...a, label: cut(a.label, 160) })),
+    messages: spec.messages.slice(0, 48).map((m) => ({ ...m, label: cut(m.label, 140) })),
+    steps: spec.steps.slice(0, 40).map((s) => ({
+      ...s,
+      label: cut(s.label, 160),
+      ...(s.branches
+        ? { branches: s.branches.slice(0, 8).map((b) => (b.label === undefined ? b : { ...b, label: cut(b.label, 80) })) }
+        : {}),
+    })),
+    states: spec.states.slice(0, 32).map((s) => ({ ...s, label: cut(s.label, 140) })),
+    transitions: spec.transitions.slice(0, 48).map((t) => ({
+      ...t,
+      event: cut(t.event, 100),
+      ...(t.guard === undefined ? {} : { guard: maybe(t.guard, 100) }),
+      ...(t.action === undefined ? {} : { action: maybe(t.action, 100) }),
+    })),
+    entities: spec.entities.slice(0, 24).map((e) => ({
+      ...e,
+      name: cut(e.name, 120),
+      attributes: e.attributes.slice(0, 16).map((row) => cut(row, 120)),
+    })),
+    relations: spec.relations.slice(0, 48).map((r) => ({
+      ...r,
+      cardinality: cut(r.cardinality, 24),
+      ...(r.label === undefined ? {} : { label: maybe(r.label, 80) }),
+    })),
+    ...(spec.fragments
+      ? {
+          fragments: spec.fragments.slice(0, 16).map((f) => ({
+            ...f,
+            guard: cut(f.guard, 100),
+            ...(f.elseGuard === undefined ? {} : { elseGuard: maybe(f.elseGuard, 100) }),
+          })),
+        }
+      : {}),
+  };
+}
+
 export function morphSelectionToNotation(
   selectedIds: string[],
   allElements: JevElement[],
@@ -2208,6 +2255,8 @@ export function morphSelectionToNotation(
     outgoingExternal = extracted.outgoingExternal;
   }
 
+  groupRecord = { ...groupRecord, spec: clampSpecForStorage(groupRecord.spec) };
+
   let layoutOut: {
     elements: JevElement[];
     entryId: string;
@@ -2264,7 +2313,9 @@ export function morphSelectionToNotation(
       e.kind !== "final"
   );
   const attachIdx = anchorIdx >= 0 ? anchorIdx : 0;
-  const withRecord: JevElement[] = layoutOut.elements.map((el, idx) => {
+  const withRecord: JevElement[] = layoutOut.elements.map((laidOut, idx) => {
+    const el = { ...laidOut, label: laidOut.label.slice(0, MAX_LABEL_LENGTH) };
+    if (el.sublabel !== undefined) el.sublabel = el.sublabel.slice(0, MAX_SUBLABEL_LENGTH);
     const baseMeta: ElementMorphMeta = el.morphMeta ?? {
       groupId: groupRecord.groupId,
       notation: targetNotation,

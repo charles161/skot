@@ -154,6 +154,7 @@ import {
   type PeerQuarantineIncident,
 } from "@/lib/jev/remote-guard";
 import {
+  MAX_BOARD_ELEMENTS,
   parseStoredBoardSnapshot,
   type StoredBoardSnapshot,
 } from "@/lib/jev/sync-validation";
@@ -1214,6 +1215,11 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       const shouldBroadcast = opts?.broadcast ?? true;
       const prev = elementsRef.current;
       const rawNext = updater(prev);
+      if (rawNext.length > MAX_BOARD_ELEMENTS && rawNext.length > prev.length) {
+        // One more would save a board that cannot be loaded back.
+        showBoardNotice({ tone: "error", text: `A board holds ${MAX_BOARD_ELEMENTS} elements. Remove something first.` });
+        return prev;
+      }
       const peerId = collabRef.current?.peerId ?? "local";
       const now = Date.now();
       const stamped = applyLocalElementsChange(
@@ -1284,7 +1290,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
 
       return stamped.elements;
     },
-    [getHistory]
+    [getHistory, showBoardNotice]
   );
 
   const presentPool = useCallback(
