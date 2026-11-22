@@ -106,7 +106,17 @@ export function PredictionHud({
   const hint = moved
     ? { headline: `Enter ${moved.addElements.some((e) => e.kind !== "arrow") ? "adds" : "connects"} ${moved.title}`, detail: "" }
     : intent
-      ? { headline: intent.headline, detail: intent.detail }
+      ? {
+          headline: intent.headline,
+          // A connection is on offer: the words follow what Enter does right now (it takes the highlighted
+          // connection, or nothing when the highlight is gone after a click or an accepted connection).
+          detail:
+            intent.offersEnter === undefined
+              ? intent.detail
+              : intent.offersEnter && activeIndex === 0
+                ? "Enter accepts, typing skips"
+                : "Tab picks one, typing skips",
+        }
       : null;
   const heading = typing
     ? "Add it, or go bigger"

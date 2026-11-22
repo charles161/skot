@@ -1417,6 +1417,7 @@ export function buildAfterCreateOptions(input: {
       kind: "domain_continue",
       headline: input.offerEnter === false ? `More connections for ${node.label || node.kind}` : `Connect ${node.label || node.kind}?`,
       detail: input.offerEnter === false ? "Tab picks one, typing skips" : "Enter accepts, typing skips",
+      offersEnter: input.offerEnter !== false,
       subjectId: node.id,
       relatedIds: [],
       timestamp: Date.now(),

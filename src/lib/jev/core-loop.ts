@@ -129,7 +129,10 @@ export const MAX_TYPED_LABEL = 120;
 export function typedNodeLabel(text: string): string {
   const raw = text.replace(/\s+/g, " ").trim().slice(0, MAX_TYPED_LABEL).trim();
   if (!raw) return "";
-  const named = CATALOG.find((c) => norm(c.label) === norm(raw));
+  // The catalog's spelling only when it is the typed text with different capitals or spacing: "api gateway"
+  // and "apigateway" are "API Gateway", but "dead letter queue" does not grow a hyphen nobody typed.
+  const squeeze = (t: string) => t.toLowerCase().replace(/\s+/g, "");
+  const named = CATALOG.find((c) => squeeze(c.label) === squeeze(raw));
   if (named) return named.label;
   const parts = raw.split(" ");
   const sentence = parts.length > NAME_WORDS;

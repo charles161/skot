@@ -726,6 +726,13 @@ describe("capitals: a small word is only small inside a name", () => {
     expect(typedNodeLabel("plan a")).toBe("Plan A");
     expect(typedNodeLabel("queue of jobs")).toBe("Queue of Jobs");
   });
+
+  // Judge A, third round: "dead letter queue" became "Dead-letter Queue", a hyphen nobody typed.
+  it("takes the catalog's spelling only when it differs from the typed text by capitals alone", () => {
+    expect(typedNodeLabel("api gateway")).toBe("API Gateway");
+    expect(typedNodeLabel("dead letter queue")).toBe("Dead Letter Queue");
+    expect(typedNodeLabel("dead-letter queue")).toBe("Dead-letter Queue");
+  });
 });
 
 // Judge A, round 4 (second round): with API selected, the sixth and seventh nodes went two rows away while the

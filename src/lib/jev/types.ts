@@ -278,6 +278,11 @@ export interface SpatialIntent {
   delta?: { dx: number; dy: number; distance: number };
   relatedIds: string[];
   timestamp: number;
+  /**
+   * Set when the suggestions start with a connection: true while Enter takes it, false once it needs Tab. The
+   * panel words the hint from this and from what is highlighted, so the text can never promise a dead key.
+   */
+  offersEnter?: boolean;
 }
 
 export interface ElementPatch {

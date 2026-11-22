@@ -55,6 +55,17 @@ describe("the key legend says what Enter and Tab will do", () => {
     expect(text(html)).toMatch(/Enter adds API Gateway/);
   });
 
+  // Both judges, round 4 (third round): after a click on another node the pill still read "Connect Redis? ·
+  // Enter accepts" with nothing highlighted, while Enter edited the clicked node's name.
+  it("a connection hint says Enter accepts only while the connection is highlighted", () => {
+    const intent = { kind: "domain_continue" as const, headline: "Connect Redis?", detail: "Enter accepts, typing skips", offersEnter: true, relatedIds: [], timestamp: 1 };
+    const panel = { ...base, intent, predictions: [link, node("b"), node("c")] };
+    expect(text(renderToStaticMarkup(<PredictionHud {...panel} activeIndex={0} />))).toMatch(/Enter accepts, typing skips/);
+    const afterClick = text(renderToStaticMarkup(<PredictionHud {...panel} activeIndex={-1} />));
+    expect(afterClick).not.toMatch(/Enter/);
+    expect(afterClick).toMatch(/Tab picks one, typing skips/);
+  });
+
   // Round-3 judge, prod: when the AI's fourth option arrived, options 1-3 slid over 100 px to the left and a
   // click aimed at option 2 hit option 3.
   it("keeps the suggestion panel in four columns from the start, so nothing moves when the AI adds one", () => {

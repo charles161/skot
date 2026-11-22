@@ -470,8 +470,6 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   const rankAskRef = useRef<SettledAsk<RankJob> | null>(null);
   /** The suggestion list on screen as of the last render. */
   const shownPredictionsRef = useRef<PredictedAction[]>([]);
-  /** The node last drawn with a shape tool, until it is named or something else happens. */
-  const toolCreatedIdRef = useRef<string | null>(null);
   const showSelectionPredictionsRef = useRef<(key: string, signal: AbortSignal) => void>(() => {});
   const selectionTriggerRef = useRef<SelectionSuggestTrigger | null>(null);
 
@@ -1443,9 +1441,9 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
    * the usual next steps. The order is the board's; jev only marks its pick.
    */
   const presentAfterCreate = useCallback(
-    (nodeId: string, anchorIds: string[], els: JevElement[], userPicked = false, offerEnter = true): boolean => {
+    (nodeId: string, anchorIds: string[], els: JevElement[], userPicked = false, offerEnter = true) => {
       lastTouchedIdRef.current = nodeId;
-      if (aiQuietRef.current) return false;
+      if (aiQuietRef.current) return;
       const result = buildAfterCreateOptions({
         elements: els,
         nodeId,
@@ -1457,12 +1455,10 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       if (!result) {
         setPredictions([]);
         setIntent(null);
-        return false;
+        return;
       }
       // Enter takes the node's first offered connection, once. After that its other connections wait for Tab.
-      const highlight = offerEnter ? enterDefaultIndex(result.options, nodeId) : NO_OPTION;
-      presentNextOptions(result, els, { highlight });
-      return highlight !== NO_OPTION;
+      presentNextOptions(result, els, { highlight: offerEnter ? enterDefaultIndex(result.options, nodeId) : NO_OPTION });
     },
     [presentNextOptions]
   );
@@ -1530,7 +1526,8 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       const latest = elementsRef.current.some((e) => e.id === created.id)
         ? elementsRef.current
         : [...elementsRef.current, created];
-      // An arrow drawn onto an existing node adds no node: its other connections are offered, never to Enter.
+      // Drawn with a tool, whether a shape (named with its own Enter) or an arrow onto an existing node: the
+      // node's connections are offered, never to Enter. Enter's offer is for a name typed in the bar.
       const drewArrow = via === "arrow";
       pushEditDelta({
         op: "add",
@@ -1538,8 +1535,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         labels: [created.label],
         summary: `${drewArrow ? "Connected" : "Added"} ${created.label || created.kind}`,
       });
-      toolCreatedIdRef.current = drewArrow ? null : created.id;
-      presentAfterCreate(created.id, [], latest, false, !drewArrow);
+      presentAfterCreate(created.id, [], latest, false, false);
     },
     [presentAfterCreate, pushEditDelta]
   );
@@ -1574,16 +1570,9 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       });
       selectionTriggerRef.current?.consume();
       const wired = latest.some((e) => e.kind === "arrow" && (e.fromId === edited.id || e.toId === edited.id));
-      // Naming a node just drawn with a tool finishes adding it: Enter may take its connection. Renaming an
-      // older node adds nothing.
-      const justDrawn = toolCreatedIdRef.current === edited.id;
-      toolCreatedIdRef.current = null;
-      if (wired) {
-        presentSubjectOptions(edited.id, latest);
-      } else if (presentAfterCreate(edited.id, [], latest, false, justDrawn)) {
-        // The node's toolbar would sit on the connection now previewed for it; a click on the node brings it back.
-        setInspectorOpen(false);
-      }
+      // The Enter that named the node is spent: its connections are offered, not highlighted.
+      if (wired) presentSubjectOptions(edited.id, latest);
+      else presentAfterCreate(edited.id, [], latest, false, false);
     },
     [presentSubjectOptions, presentAfterCreate, pushEditDelta]
   );

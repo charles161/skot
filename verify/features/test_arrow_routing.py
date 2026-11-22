@@ -67,9 +67,12 @@ def test_arrows_route_around(page, skot, evidence):
     middle = skot.add("box", "Roadmap", skot.to_world(*row[1]))
     gateway = skot.add("box", "API Gateway", skot.to_world(*row[2]))
     before = frozen(skot.elements())
+    # A tool-drawn node's connections are offered but not highlighted (1A): Tab picks the first.
+    skot.press("Tab")
+    page.wait_for_timeout(200)
     first = read_options(page)[0]
     assert first["active"] and "App" in first["title"] and "API Gateway" in first["title"], \
-        "the connection App -> API Gateway should be offered and highlighted: %s" % first
+        "the connection App -> API Gateway should be offered first: %s" % first
     page.wait_for_timeout(400)
     ghost = [a for a in ghosts(page)["arrows"] if {a["from"], a["to"]} == {app["id"], gateway["id"]}]
     assert len(ghost) == 1, "the offered connection should be previewed as one ghost arrow: %s" % ghosts(page)

@@ -225,6 +225,37 @@ def test_enter_needs_pick(page, skot, evidence, ai):
     page.keyboard.press("Escape")
     shot(page, evidence, "enter-needs-pick", "7-click-then-enter")
     assert arrows_named(skot.elements()) == [], "Enter right after clicking a node accepted the old offer: %s" % arrows_named(skot.elements())
+
+    # 8. Both judges, third round: after clicking another node the pill still read "Connect Postgres? Enter
+    # accepts" while Enter edited the clicked node's name.
+    type_enter(page, "redis")
+    board(skot, 3)
+    assert highlighted(page), "the connection of Redis is on offer"
+    page.mouse.click(*skot.to_screen(app["x"] + app["width"] / 2, app["y"] + app["height"] * 0.55))
+    page.wait_for_timeout(150)
+    assert_hint_honest(page, "right after clicking another node")
+    page.wait_for_timeout(1200)
+    assert_hint_honest(page, "a second after clicking another node")
+
+    # 9. Judge A, third round: Alt+R, drag a box, name it "Billing", Enter, Enter added API Gateway -> Billing. A
+    # node drawn with a tool is named with its own Enter; a second Enter must not be read as "connect it".
+    skot.new_board()
+    type_enter(page, "app")
+    type_enter(page, "api gateway")
+    els = board(skot, 2)
+    n_arrows = len(arrows_named(els))
+    gw = skot.by_label("API Gateway")
+    skot.add("box", "Billing", (gw["x"] + gw["width"] + 220, gw["y"] + gw["height"] / 2))
+    page.wait_for_timeout(500)
+    assert not highlighted(page), "a tool-drawn node's connections are offered, not highlighted: %s" % highlighted(page)
+    assert_hint_honest(page, "after naming a tool-drawn node")
+    for _ in range(2):
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(400)
+    page.keyboard.press("Escape")
+    page.keyboard.press("Escape")
+    shot(page, evidence, "enter-needs-pick", "9-tool-drawn-then-enter")
+    assert len(arrows_named(skot.elements())) == n_arrows, "Enter after naming a tool-drawn node added an arrow: %s" % arrows_named(skot.elements())
     assert_no_console_errors(evidence)
 
 
