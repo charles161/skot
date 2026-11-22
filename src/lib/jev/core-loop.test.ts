@@ -876,6 +876,10 @@ describe("the first connection offered is the one that makes sense for the new n
     [["App"], "CDN", "App → CDN"],
     [["App"], "API Gateway", "App → API Gateway"],
     [["User"], "Load Balancer", "User → Load Balancer"],
+    // Both judges, round 5: "app, postgres, Enter, Enter" is the most common two-node sketch. With no service and
+    // no gateway on the board, the app is what talks to the database.
+    [["App"], "Postgres", "App → Postgres"],
+    [["Postgres"], "App", "App → Postgres"],
     [["App", "API Gateway"], "Postgres", "API Gateway → Postgres"],
     [["App", "API Gateway", "Auth Service"], "Postgres", "Auth Service → Postgres"],
     [["API Gateway"], "Auth Service", "API Gateway → Auth Service"],
@@ -900,7 +904,6 @@ describe("the first connection offered is the one that makes sense for the new n
     [["CDN"], "Kafka", null],
     [["Redis"], "Kafka", null],
     [["Postgres", "Kafka"], "Object Storage", null],
-    [["App"], "Postgres", null],
     [["Alpha"], "Beta", null],
     [["Redis"], "Zorblax", "Zorblax → Redis"],
     [["Kafka"], "CDN", null],
@@ -929,7 +932,8 @@ describe("the first connection offered is the one that makes sense for the new n
 // Charles, 22 Nov (16A): "A name gets the same shape inside a -> b as typed alone." Judge A, round 4: plain "api"
 // was a hexagon, "api" inside a flow a box.
 describe("a name looks the same typed alone and typed inside a flow", () => {
-  const NAMES = ["api", "api gateway", "postgres", "redis", "kafka", "user", "cdn", "worker", "s3", "billing", "queue", "web", "load balancer", "db"];
+  // "mysql": judge B, round 5: in a flow it was named "Mysql", alone "MySQL".
+  const NAMES = ["api", "api gateway", "postgres", "redis", "kafka", "user", "cdn", "worker", "s3", "billing", "queue", "web", "load balancer", "db", "mysql", "dynamodb", "graphql api"];
   const look = (e: JevElement) => ({ label: e.label, kind: e.kind, sublabel: e.sublabel ?? "", width: e.width, height: e.height });
   const alone = (name: string) => look(planTypedNode({ elements: [], text: name, viewportCenter: CENTER })!.node);
   const inFlow = (text: string, label: string) => {

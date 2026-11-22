@@ -265,3 +265,38 @@ def test_labels_stay_clear(page, skot, evidence, browser, server, base_url):
         ctx.close()
     assert_no_console_errors_but_ai(evidence)
 
+
+@check("click-shows-options-at-once")
+def test_click_shows_options_at_once(page, skot, evidence, new_page, base_url):
+    """Judge B, round 5 (contract rule 4): "app, cdn (connect), api gateway", click CDN, Tab, Enter drew
+    CDN -> API Gateway 50 ms after the click and added Object Storage 3 s after it. For about a second the panel
+    still held the previous node's options. A click shows the clicked node's own options at once."""
+    results = {}
+    for pause in (50, 3000):
+        p = new_page("pause-%d" % pause)
+        p.route("**/api/jev/decide", AI_OFF)
+        d = Driver(p, base_url)
+        d.new_board()
+        type_enter(p, "app")
+        type_enter(p, "cdn")
+        p.keyboard.press("Enter")
+        d.wait_state(lambda es: len(arrows_named(es)) == 1, what="App -> CDN accepted")
+        type_enter(p, "api gateway")
+        board(d, 3)
+        p.wait_for_timeout(400)
+        cdn = d.by_label("CDN")
+        p.mouse.click(*d.to_screen(cdn["x"] + cdn["width"] / 2, cdn["y"] + cdn["height"] * 0.55))
+        p.wait_for_timeout(pause)
+        titles = [o["title"] for o in read_options(p, 2)]
+        p.keyboard.press("Tab")
+        p.keyboard.press("Enter")
+        p.wait_for_timeout(900)
+        els = d.elements()
+        shot(p, evidence, "click-shows-options-at-once", "after-%dms" % pause)
+        results[pause] = {"options_at_tab": titles, "nodes": sorted(e["label"] for e in els if is_shape(e)), "arrows": arrows_named(els)}
+    evidence.note(**{"pause_%d" % k: v for k, v in results.items()})
+    assert results[50] == results[3000], \
+        "click, Tab, Enter must do the same 50 ms and 3 s after the click:\n 50 ms: %s\n 3 s:   %s" % (results[50], results[3000])
+    assert not [t for t in results[50]["options_at_tab"] if "API Gateway" in t and "→" in t], \
+        "the panel must show the clicked node's own options, not the last node's connections: %s" % results[50]["options_at_tab"]
+

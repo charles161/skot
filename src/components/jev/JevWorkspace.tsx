@@ -1402,7 +1402,10 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   );
 
   useEffect(() => {
+    // At once: a click replaces the suggestions with the clicked node's own in the same turn, so "click, Tab,
+    // Enter" does the same thing however fast it is pressed. (The AI is asked later, once the board settles.)
     const trigger = new SelectionSuggestTrigger({
+      delayMs: 0,
       onFire: (key, signal) => showSelectionPredictionsRef.current(key, signal),
     });
     selectionTriggerRef.current = trigger;

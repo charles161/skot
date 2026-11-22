@@ -242,6 +242,19 @@ describe("there and back between two nodes", () => {
     expect(Math.sign(up.y - 336)).toBe(-Math.sign(down.y - 336));
   });
 
+  // Judge B, round 5: Email Service -> Worker lay exactly on Worker -> Email Service where both had to go round
+  // a node: a routed pair took the same way round, on the same curve.
+  it("when both have to go round a node, they still part", () => {
+    const row = [box("a", 0, 300), box("mid", 300, 300), box("c", 600, 300)];
+    const out = link("a", "c");
+    const home = link("c", "a");
+    const map = byId([...row, out, home]);
+    const one = resolveArrowEndpoints(out, map);
+    const two = resolveArrowEndpoints(home, map);
+    expect(Math.hypot(one.control.x - two.control.x, one.control.y - two.control.y)).toBeGreaterThanOrEqual(24);
+    for (const arrow of [out, home]) expect(arrowHitsShape(arrow, map, row, 2)).toBeNull();
+  });
+
   it("one arrow alone stays the straight line it was", () => {
     const map = byId([...pair, there]);
     expect(resolveArrowEndpoints(there, map)).toEqual(legacy(there, map));

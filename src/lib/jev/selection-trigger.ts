@@ -1,5 +1,6 @@
 /**
- * Decides WHEN selection-based predictions appear: after a short idle on a settled selection, never
+ * Decides WHEN selection-based predictions appear: on a settled selection (at once with `delayMs: 0`, which is
+ * how the workspace runs it: the suggestions are local and instant), never
  * while the canvas is busy (drag, marquee, inline edit), never for a selection that was just moved or
  * edited (those flows refresh predictions themselves), and not again after Esc until the selection
  * changes. Each fire gets an AbortSignal that aborts as soon as the selection changes.
@@ -78,14 +79,17 @@ export class SelectionSuggestTrigger {
     this.cancelTimer();
     if (!this.key || this.busy || this.done.has(this.key)) return;
     const key = this.key;
-    this.timer = setTimeout(() => {
+    const fire = () => {
       this.timer = null;
       if (this.key !== key || this.busy || this.done.has(key)) return;
       this.done.add(key);
       this.abortInflight();
       this.inflight = new AbortController();
       this.onFire(key, this.inflight.signal);
-    }, this.delayMs);
+    };
+    // No delay: fire now, in the same turn as the click, so nothing can be pressed against the old suggestions.
+    if (this.delayMs <= 0) fire();
+    else this.timer = setTimeout(fire, this.delayMs);
   }
 
   private cancelTimer(): void {

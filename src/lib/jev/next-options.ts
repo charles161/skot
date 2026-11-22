@@ -35,6 +35,7 @@ import {
   slotBeside,
   typedNodeLabel,
   typedNodeLook,
+  flowNames,
   typedNodeOption,
   type TypedNodePlan,
 } from "./core-loop";
@@ -613,8 +614,10 @@ function describedDrafts(text: string, anchor: JevElement | null): Draft[] | nul
 
 function flowDrafts(text: string, elements: JevElement[], anchor: JevElement | null): Draft[] {
   const local = buildLocalSemanticGraphFromPrompt(text).graph;
-  // Each name in a flow is drawn exactly as it would be typed alone: same label, shape and caption.
-  const nodes: DraftNode[] = local.nodes.map((n) => ({ key: n.id, ...typedNodeLook(n.label) }));
+  // Each name in a flow is drawn exactly as it would be typed alone: same label, shape and caption. The look
+  // comes from the text as typed ("mysql" is "MySQL"), not from a label something else already recased.
+  const asTyped = new Map(flowNames(text).map((raw) => [norm(raw), raw]));
+  const nodes: DraftNode[] = local.nodes.map((n) => ({ key: n.id, ...typedNodeLook(asTyped.get(norm(n.label)) ?? n.label) }));
   const edges: DraftEdge[] = local.edges.map((e) => ({ from: e.from, to: e.to, label: e.label, dashed: e.dashed }));
   const tail = nodes[nodes.length - 1];
   const tailComp = componentForLabel(tail.label);

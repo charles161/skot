@@ -96,6 +96,12 @@ export function kindForLabel(label: string): ShapeKind {
 const FLOW_ARROW = /(->|=>|→|<->|↔)/;
 /** "app -> api": the user typed the connections too, so it is drawn as a flow, not as one node. */
 export const isFlowText = (text: string) => FLOW_ARROW.test(text);
+/** The names in a typed flow, exactly as typed, in order. */
+export const flowNames = (text: string): string[] =>
+  text
+    .split(/<->|->|=>|→|↔/)
+    .map((part) => part.trim())
+    .filter(Boolean);
 
 const ACRONYMS = new Set(
   ("api db cdn lb sql ui llm ai dns cdc jwt sso http https tcp udp url id sdk ws mq etl vm aws gcp cpu gpu ml rag kv ttl " +
@@ -245,6 +251,8 @@ const frontsServices = (node: LabeledNode): boolean =>
 interface Board {
   /** No service is on the board: a gateway stands in for the one that would do the writing. */
   noService: boolean;
+  /** Nor a gateway or load balancer: then the app itself is what talks to the database ("app, postgres"). */
+  noGateway: boolean;
 }
 
 /**
@@ -265,8 +273,10 @@ function arrowSense(from: LabeledNode, to: LabeledNode, board: Board): Flow {
   if (!ra || !rb) return { strength: Math.min(known, UNNAMED_CAP) >= SENSIBLE ? UNNAMED_CAP : 0 };
   // Requests reach a service through an edge that routes to services; a CDN in front of one is seen, not usual.
   if (ra === "edge" && rb === "service" && !frontsServices(from)) return { strength: 4 };
-  // With no service on the board, the gateway in front is what talks to the database, the cache or the queue.
-  const standIn = board.noService && frontsServices(from) ? (ARROW_SENSE.service[rb] ?? 0) - 2 : 0;
+  // With no service on the board, the gateway in front is what talks to the database, the cache or the queue;
+  // with no gateway either, the app does.
+  const standsIn = board.noService && (frontsServices(from) || (board.noGateway && ra === "client"));
+  const standIn = standsIn ? (ARROW_SENSE.service[rb] ?? 0) - 2 : 0;
   return { strength: Math.max(known, standIn) };
 }
 
@@ -587,7 +597,11 @@ export function connectionOptions(input: ConnectionInput): PredictedAction[] {
   const here = getElementCenter(node);
   const byId = new Map(input.elements.map((e) => [e.id, e]));
   const solid = input.elements.filter((e) => isObstacle(e) && e.kind !== "freedraw");
-  const board: Board = { noService: !input.elements.some((e) => isComponentShape(e) && flowRole(e) === "service") };
+  const parts = input.elements.filter(isComponentShape);
+  const board: Board = {
+    noService: !parts.some((e) => flowRole(e) === "service"),
+    noGateway: !parts.some(frontsServices),
+  };
   const scored = others.map((other, index) => {
     const usual = bestArrow(other, node, board);
     const isAnchor = input.anchorIds?.includes(other.id) ?? false;

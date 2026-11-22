@@ -321,8 +321,23 @@ export function resolveArrowEndpoints(
   };
   const routable =
     fromEl && toEl && fromEl.id !== toEl.id && arrow.arrowStyle !== "straight" && isSketch(arrow) && isSketch(fromEl) && isSketch(toEl);
-  return routable ? routeAroundNodes(base, fromEl, toEl, elementsById) : base;
+  if (!routable) return base;
+  const routed = routeAroundNodes(base, fromEl, toEl, elementsById);
+  if (routed === base || !hasWayBack(arrow, elementsById)) return routed;
+  // There and back both go the same way round a node: each is nudged to its own side so they still part.
+  const len = Math.hypot(routed.end.x - routed.start.x, routed.end.y - routed.start.y) || 1;
+  const apart = {
+    ...routed,
+    control: {
+      x: routed.control.x - ((routed.end.y - routed.start.y) / len) * WAY_BACK_NUDGE,
+      y: routed.control.y + ((routed.end.x - routed.start.x) / len) * WAY_BACK_NUDGE,
+    },
+  };
+  return apart;
 }
+
+/** How far each of two opposite arrows that share a way round is pushed to its own side. */
+const WAY_BACK_NUDGE = 12;
 
 /** Distance from a point to an arrow as drawn (its curve, not the straight line between its ends). */
 export function pointToArrowDistance(pt: Point, geom: ArrowGeometry): number {

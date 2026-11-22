@@ -207,6 +207,14 @@ features:
       - src/lib/jev/ghost-geometry.ts
       - src/components/jev/JevCanvas.tsx
 
+  - id: click-shows-options-at-once
+    title: "A click on a node shows that node's own options at once: click, Tab, Enter does the same thing 50 ms
+      and 3 s after the click"
+    check: click-shows-options-at-once
+    sources:
+      - src/lib/jev/selection-trigger.ts
+      - src/components/jev/JevWorkspace.tsx
+
   - id: call-budget
     title: "Drawing does not drain the AI budget: nothing is asked while a shape, label or arrow is in progress; a
       settled add, arrow, click or drag costs one call; a 6-node, 5-arrow board drawn quickly costs at most 3, and
