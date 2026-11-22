@@ -4,10 +4,10 @@
 import { describe, expect, it } from "vitest";
 import { connectionOptions, isFlowText, planTypedNode, typedNodeLabel } from "@/lib/jev/core-loop";
 import {
+  appendContextOption,
   bestContextOption,
   buildAfterCreateOptions,
   buildNextOptions,
-  placeContextOption,
   predictConcept,
   scoreOptions,
 } from "@/lib/jev/next-options";
@@ -63,6 +63,10 @@ describe("the node is named what the user typed", () => {
     ["payments with stripe and a ledger", "Payments with stripe and a ledger"],
     ["user uploads a photo, a worker stores it in s3", "User uploads a photo, a worker stores it in S3"],
     ["orders read replica", "Orders Read Replica"],
+    ["dynamodb", "DynamoDB"],
+    ["mongodb orders", "MongoDB Orders"],
+    ["graphql api", "GraphQL API"],
+    ["mysql", "MySQL"],
     ["the cache", "The Cache"],
   ])("%s -> %s", (typed, label) => {
     expect(typedNodeLabel(typed)).toBe(label);
@@ -215,6 +219,22 @@ describe("placement: free space beside the selected, related or last node", () =
     expect(adjacent).toBe(true);
     expect(Math.abs(node.x + node.width / 2 - (app.x + app.width / 2))).toBeLessThanOrEqual(2);
     expect(node.y).toBeGreaterThan(app.y + app.height);
+  });
+
+  // Round-2 judge, prod: with the cell under its twin taken, the second Postgres went diagonal.
+  it("keeps copies in one column under their twin, past a cell that is taken", () => {
+    const under = el({ id: "u", label: "Billing", x: 400, y: 432 });
+    const { node, anchorId } = plan("api gateway", [...chain, under], { lastFocusedId: "pg" });
+    expect(anchorId).toBe("gw");
+    expect(Math.abs(node.x + node.width / 2 - (gateway.x + gateway.width / 2))).toBeLessThanOrEqual(2);
+    expect(node.y).toBeGreaterThan(under.y + under.height);
+  });
+
+  // Round-2 judge, prod: "email sender", typed right after "notification service", landed beside the load balancer.
+  it("puts a node beside another of its own kind before a more distant feeder", () => {
+    const lb = el({ id: "lb", label: "Load Balancer", kind: "lb", x: 100, y: 300, width: 168, height: 80 });
+    const notify = el({ id: "ns", label: "Notification Service", x: 900, y: 300 });
+    expect(plan("email sender", [lb, notify], { lastFocusedId: "ns" }).anchorId).toBe("ns");
   });
 
   it("puts a copy straight under its twin", () => {
@@ -522,6 +542,24 @@ describe("typing shows what Enter adds as option 1", () => {
     expect(byName.addElements.find((e) => e.kind === "arrow")).toMatchObject({ fromId: "app", toId: "udb" });
   });
 
+  // Round-2 judge, prod: on a board with App and Postgres, "app -> cache -> postgres" put Cache beyond Postgres
+  // and the flow read backwards.
+  it("a node typed between two board nodes lands between them, below, so the flow still reads left to right", () => {
+    const far = el({ id: "pg2", label: "Postgres", kind: "database", x: 700, y: 293, width: 156, height: 86 });
+    const flow = typed("app -> cache -> postgres", [app, far]).options[0];
+    const shapes = flow.addElements.filter((e) => e.kind !== "arrow");
+    expect(shapes.map((e) => e.label)).toEqual(["Cache"]);
+    const cache = shapes[0];
+    const mid = cache.x + cache.width / 2;
+    expect(mid).toBeGreaterThan(app.x + app.width);
+    expect(mid).toBeLessThan(far.x);
+    expect(cache.y).toBeGreaterThan(Math.max(app.y + app.height, far.y + far.height));
+    expect(flow.addElements.filter((e) => e.kind === "arrow").map((a) => [a.fromId, a.toId])).toEqual([
+      ["app", cache.id],
+      [cache.id, "pg2"],
+    ]);
+  });
+
   it("a typed flow is drawn as typed, with the same capitals", () => {
     const result = typed("app -> api gateway -> postgres", []);
     expect(result.typed).toBeNull();
@@ -585,20 +623,14 @@ describe("the node the AI names from the board", () => {
   const ctx = opt("ctx_0", 1);
   const ids = (options: PredictedAction[]) => options.map((o) => o.id);
 
-  it("never takes the highlighted slot: what Enter does is the same before and after the AI answers", () => {
+  // Round-2 judge, prod: "api gateway⏎ postgres⏎ Tab ⏎" added Read Replica when the AI failed and Connection
+  // Pooler when it had answered, because the board-named node took slot 2.
+  it("is added after the options, so every key that reached an option before the AI answered still does", () => {
     const tiers = [opt("a", 1, "minimal"), opt("b", 3, "cluster"), opt("c", 7, "full")];
-    for (const active of [0, 1, 2]) {
-      const placed = placeContextOption(tiers, active, ctx);
-      expect(placed).toHaveLength(3);
-      expect(placed[active]).toBe(tiers[active]);
-      expect(ids(placed)).toContain("ctx_0");
-    }
-  });
-
-  it("replaces a one-node step first, then the cluster, and keeps the links and the full design", () => {
-    expect(ids(placeContextOption([opt("link", 0), opt("step", 1, "minimal"), opt("cluster", 3, "cluster")], 0, ctx))).toEqual(["link", "ctx_0", "cluster"]);
-    expect(ids(placeContextOption([opt("a", 1, "minimal"), opt("b", 3, "cluster"), opt("c", 7, "full")], 0, ctx))).toEqual(["a", "ctx_0", "c"]);
-    expect(ids(placeContextOption([opt("l1", 0), opt("l2", 0), opt("l3", 0)], 0, ctx))).toEqual(["l1", "l2", "ctx_0"]);
-    expect(ids(placeContextOption([opt("l1", 0)], 0, ctx))).toEqual(["l1", "ctx_0"]);
+    const placed = appendContextOption(tiers, ctx);
+    expect(ids(placed)).toEqual(["a", "b", "c", "ctx_0"]);
+    for (let i = 0; i < tiers.length; i++) expect(placed[i]).toBe(tiers[i]);
+    expect(ids(appendContextOption([opt("l1", 0)], ctx))).toEqual(["l1", "ctx_0"]);
+    expect(ids(appendContextOption(placed, opt("ctx_1", 1)))).toEqual(["a", "b", "c", "ctx_0"]);
   });
 });

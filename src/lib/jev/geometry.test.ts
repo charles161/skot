@@ -460,4 +460,17 @@ describe("computeViewportKeepBoard: a growing diagram stays whole", () => {
     expect(next.zoom).toBe(1);
     expect(onScreen(next, node(6400))).toBe(true);
   });
+
+  // Round-2 judge, prod phone: after accepting a suggestion the view followed the next ghost and App slid off screen.
+  it("on a phone keeps three columns in view by zooming out rather than scrolling the first away", () => {
+    const phone = { screenWidth: 390, screenHeight: 844, margins: { top: 100, right: 64, bottom: 255, left: 64 } };
+    const start = { x: 30, y: 150, zoom: 0.53 };
+    const board = { x: 60, y: 330, width: 472, height: 80 };
+    const ghost = { x: 660, y: 330, width: 172, height: 72 };
+    const next = computeViewportKeepBoard(start, ghost, board, phone);
+    expect(next.zoom).toBeLessThan(0.53);
+    expect(next.zoom).toBeGreaterThanOrEqual(0.33);
+    expect(next.x + board.x * next.zoom).toBeGreaterThanOrEqual(0);
+    expect(next.x + (ghost.x + ghost.width) * next.zoom).toBeLessThanOrEqual(390);
+  });
 });

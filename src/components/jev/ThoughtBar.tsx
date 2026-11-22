@@ -46,6 +46,8 @@ interface ThoughtBarProps {
   onEmptyEnter?: () => void;
   /** Esc with an empty bar while suggestions are open: dismiss them and keep typing. */
   onEmptyEscape?: () => void;
+  /** The name Tab would complete the text to; its remaining letters are shown in grey after the caret. */
+  completion?: string | null;
   /** Put the caret in the bar when the board opens (desktop only), so typing a name just works. */
   focusOnOpen?: boolean;
   /** What the button next to the text does: "Add" for a node, "Draw" for a flow or a bigger option. */
@@ -67,6 +69,7 @@ export function ThoughtBar({
   onEmptyTab,
   onEmptyEnter,
   onEmptyEscape,
+  completion = null,
   focusOnOpen = false,
   submitLabel = "Add",
   onEmptyUndo,
@@ -80,6 +83,11 @@ export function ThoughtBar({
     if (focusOnOpen && window.matchMedia("(pointer: fine)").matches) inputRef.current?.focus({ preventScroll: true });
   }, [focusOnOpen, inputRef]);
   const isCommand = value.trimStart().startsWith("/");
+  // What Tab adds, when the text is the start of the completion and short enough not to scroll the input.
+  const completionRest =
+    completion && value.length > 0 && value.length < 40 && completion.toLowerCase().startsWith(value.toLowerCase())
+      ? completion.slice(value.length)
+      : "";
   const commands: CommandItem[] = isCommand ? [...matchPaletteCommands(value), ...matchMoveCommands(value)] : [];
   const activeCommand = commands.length > 0 ? commands[Math.min(commandIndex, commands.length - 1)] : null;
 
@@ -236,6 +244,17 @@ export function ThoughtBar({
           <IconWand className="h-3.5 w-3.5" />
         </div>
 
+        <div className="relative min-w-0 flex-1">
+          {completionRest && (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 flex items-center overflow-hidden whitespace-pre text-[13.5px]"
+            >
+              <span className="invisible">{value}</span>
+              <span data-completion-ghost className="text-muted-foreground/70">{completionRest}</span>
+              <kbd className="ml-2 rounded border border-border bg-secondary px-1 py-px font-mono text-[9.5px] text-muted-foreground">Tab</kbd>
+            </div>
+          )}
         <input
           ref={inputRef}
           type="text"
@@ -252,8 +271,9 @@ export function ThoughtBar({
           aria-activedescendant={focused && activeCommand ? `thought-bar-command-${activeCommand.command}` : undefined}
           aria-label="Describe a component or diagram flow to draw"
           placeholder="Name a node, press Enter. a -> b draws a flow."
-          className="min-h-[36px] min-w-0 flex-1 bg-transparent text-[13.5px] text-foreground placeholder:text-muted-foreground/85 focus:outline-none sm:min-h-0"
+          className="min-h-[36px] w-full min-w-0 bg-transparent text-[13.5px] text-foreground placeholder:text-muted-foreground/85 focus:outline-none sm:min-h-0"
         />
+        </div>
 
         {value.trim() ? (
           <div className="flex shrink-0 items-center gap-1.5">

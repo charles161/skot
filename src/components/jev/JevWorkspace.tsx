@@ -3,6 +3,7 @@
 import { boardStorageKey } from "@/lib/jev/storage-keys";
 import { BrandWordmark } from "@/brand/BrandWordmark";
 import React, { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { AiQuietContext, postDecide } from "@/lib/jev/ai-quiet";
 import { getPracticePrompt, type PracticePromptId } from "@/lib/jev/practice-prompts";
 import type { ReviewComment } from "@/lib/jev/practice-review";
@@ -80,8 +81,8 @@ import { isFlowText, planTypedNode } from "@/lib/jev/core-loop";
 import {
   buildAfterCreateOptions,
   buildNextOptions,
+  appendContextOption,
   bestContextOption,
-  placeContextOption,
   predictConcept,
   scoreOptions,
   typingAnchor,
@@ -477,7 +478,13 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     (targetEls: JevElement[], margins?: ViewportMargins, opts: { keepBoard?: boolean } = {}) => {
       const bounds = computeBounds(targetEls);
       if (!bounds || typeof window === "undefined") return;
-      const fit = { screenWidth: window.innerWidth, screenHeight: window.innerHeight, margins };
+      // A phone has no room for desktop gutters, and its dock (one chip row and the bar) is short.
+      const phone = opts.keepBoard && window.innerWidth < 640;
+      const fit = {
+        screenWidth: window.innerWidth,
+        screenHeight: window.innerHeight,
+        margins: phone ? { ...margins, left: 16, right: 16, bottom: 150 } : margins,
+      };
       // keepBoard: a growing diagram zooms out to stay whole instead of scrolling its first nodes away.
       const board = opts.keepBoard ? computeBounds(elementsRef.current) : null;
       setViewport((prev) =>
@@ -518,7 +525,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         mergeContext?: boolean;
         /**
          * The options on screen keep their order and the highlight: jev's scores are written onto them, and the
-         * node the context route named from the board takes a slot the user is not on.
+         * node the context route named from the board is added after them.
          */
         keepOrder?: boolean;
       } = {}
@@ -601,7 +608,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
             // The panel moved on (the user typed, or picked something): this answer is for options no longer shown.
             if (prev.length !== pool.length || prev.some((p, i) => p.id !== pool[i].id)) return prev;
             const scored = scoreOptions(prev, data.contextSuggestions ?? [], probs);
-            return named ? placeContextOption(scored, activePredIdxRef.current, named) : scored;
+            return named ? appendContextOption(scored, named) : scored;
           });
           setTelemetry({
             source: isLiveModel ? data.source : "heuristic",
@@ -1317,9 +1324,10 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     (letter: string) => {
       const input = thoughtInputRef.current;
       const next = (input?.value ?? "") + letter;
-      changeThought(next);
+      // Rendered at once: the next key may arrive before a deferred render and would land ahead of this letter.
+      flushSync(() => changeThought(next));
       input?.focus({ preventScroll: true });
-      window.requestAnimationFrame(() => input?.setSelectionRange(next.length, next.length));
+      input?.setSelectionRange(next.length, next.length);
     },
     [changeThought]
   );
@@ -1439,6 +1447,8 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       }
       // The selection is the user's alone: a node the app adds or extends is never selected for them, so the
       // handles on the board always mean "the next node lands beside this".
+      setInspectorOpen(false);
+      selectionTriggerRef.current?.consume();
       // An accepted link: offer what else the node could connect to before moving on to bigger steps.
       const acceptedLink = pred.category === "connect" && !pred.tier && placed.length === 0;
       if (acceptedLink) presentAfterCreate(nextFocus.id, [], nextElsSnapshot);
@@ -1498,6 +1508,9 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       setThoughtPrompt("");
       ensureElementsVisible([node], { top: 104, right: 64, bottom: 255, left: 64 }, { keepBoard: true });
       announceStatus(`Added ${node.label}`);
+      // The suggestions now on screen are this node's: a click made a moment ago must not replace them.
+      setInspectorOpen(false);
+      selectionTriggerRef.current?.consume();
       presentAfterCreate(node.id, plan.anchorIds, next, plan.userPicked);
     },
     [
@@ -2568,9 +2581,9 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         return;
       }
 
-      // 1 / 2 / 3 quick select prediction
+      // 1 / 2 / 3 / 4 quick select prediction
       if (
-        (e.key === "1" || e.key === "2" || e.key === "3") &&
+        (e.key === "1" || e.key === "2" || e.key === "3" || e.key === "4") &&
         predictions.length > 0 &&
         !e.metaKey &&
         !e.ctrlKey
@@ -3524,6 +3537,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
           inputRef={thoughtInputRef}
           value={thoughtPrompt}
           hasPredictions={Boolean(forkSession) || predictions.length > 0}
+          completion={completion}
           onChange={changeThought}
           accessory={<MovesMenu onRun={(move) => moves.run(move)} quiet={aiQuiet} />}
           onSubmit={(prompt) => {

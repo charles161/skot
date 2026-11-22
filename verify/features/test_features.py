@@ -295,7 +295,8 @@ def read_options(page, wait_s=12.0):
     got = None
     while time.time() < deadline:
         got = page.evaluate(READ_OPTIONS_JS)
-        if got and len(got["items"]) == 3 and not got["deciding"]:
+        # Three options from the board; a fourth when the AI has named a node from it.
+        if got and len(got["items"]) >= 3 and not got["deciding"]:
             break
         page.wait_for_timeout(150)
     return got["items"] if got else []
@@ -540,6 +541,8 @@ def test_type_tab_enter(page, skot, evidence):
     assert opts[0]["active"], "(a) should be highlighted: %s" % opts
     legend = page.locator(SUGGESTIONS + " [data-key-legend]").inner_text().replace("\n", " ")
     assert "add node" in legend and "complete to API Gateway" in legend, "the legend must say what Enter and Tab do: %r" % legend
+    ghost = page.locator("[data-completion-ghost]")
+    assert ghost.count() == 1 and ghost.inner_text() == " Gateway", "the bar should show what Tab completes, in grey"
     page.keyboard.press("Tab")
     page.wait_for_timeout(250)
     shot(page, evidence, "type-tab-enter", "3-tab")

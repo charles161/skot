@@ -445,8 +445,13 @@ export function computeViewportEnsureVisible(
   });
 }
 
-/** The whole board stays readable down to this zoom; past it the view follows the newest node instead. */
+/**
+ * The whole board stays readable down to this zoom; past it the view follows the newest node instead. A phone
+ * already opens at about 0.53 and is read closer, so it may go further before earlier nodes scroll away.
+ */
 export const WHOLE_BOARD_MIN_ZOOM = 0.5;
+export const WHOLE_BOARD_MIN_ZOOM_PHONE = 0.33;
+const PHONE_WIDTH = 640;
 
 /**
  * Keeps `target` in view the gentle way. Nothing moves while it is already visible. When it is not, the view
@@ -471,5 +476,6 @@ export function computeViewportKeepBoard(
     height: Math.max(board.y + board.height, target.y + target.height) - y,
   };
   const whole = computeViewportFit(all, { ...opts, minZoom: 0.01, maxZoom: Math.min(opts.maxZoom ?? 1.1, viewport.zoom) });
-  return whole.zoom >= WHOLE_BOARD_MIN_ZOOM ? whole : toTarget;
+  const floor = opts.screenWidth < PHONE_WIDTH ? WHOLE_BOARD_MIN_ZOOM_PHONE : WHOLE_BOARD_MIN_ZOOM;
+  return whole.zoom >= floor ? whole : toTarget;
 }

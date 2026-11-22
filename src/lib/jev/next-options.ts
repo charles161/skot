@@ -24,6 +24,7 @@ import {
 } from "./component-catalog";
 import {
   connectionOptions,
+  freeSpotAround,
   isFlowText,
   kindForLabel,
   makeLink,
@@ -1016,7 +1017,26 @@ function materialize(draft: Draft, ctx: Context): Materialized {
     origin: ctx.viewportCenter,
   });
   for (const f of fresh) {
-    const at = positions.get(f.id) ?? ctx.viewportCenter;
+    let at = positions.get(f.id) ?? ctx.viewportCenter;
+    if (ctx.standalone) {
+      // A node typed between two board nodes ("app -> cache -> postgres") goes between them, one row down:
+      // neither moves, and the flow still reads left to right.
+      const before = edges.filter((e) => e.to === f.id).map((e) => byId.get(e.from)).filter((e): e is JevElement => Boolean(e));
+      const after = edges.filter((e) => e.from === f.id).map((e) => byId.get(e.to)).filter((e): e is JevElement => Boolean(e));
+      if (before.length > 0 && after.length > 0) {
+        const ends = [before[0], after[0]];
+        const size = sizeFor(f.kind);
+        const taken = [...elements, ...created.values()];
+        at = freeSpotAround(
+          {
+            x: (getElementCenter(ends[0]).x + getElementCenter(ends[1]).x) / 2,
+            y: Math.max(...ends.map((e) => e.y + e.height)) + 64 + size.height / 2,
+          },
+          size,
+          taken
+        );
+      }
+    }
     created.set(f.id, { ...makeShape(f.kind, f.label, f.sublabel, at), id: f.id, seed: makeSeed(f.id) });
   }
   const shapes = fresh.map((f) => created.get(f.id)!);
@@ -1345,7 +1365,7 @@ export function buildNextOptions(input: NextOptionsInput): NextOptionsResult | n
         : {
             kind: "domain_continue",
             headline: `Next from "${anchor?.label || anchor?.kind}"`,
-            detail: "3 options, small to big",
+            detail: "small to big",
             subjectId: anchor?.id,
             relatedIds: [],
             timestamp: Date.now(),
@@ -1476,19 +1496,12 @@ export function scoreOptions(
 }
 
 /**
- * Where the board-named node goes among the three options. Never on the highlighted one, so what Enter does
- * is the same before and after the AI answers. It takes the place of a one-node step when there is one, else
- * of the cluster, else of the last option.
+ * The board-named node is added after the options, never in place of one: every key that reached an option
+ * before the AI answered (Enter, Tab Enter, 2) still reaches the same option after.
  */
-export function placeContextOption(options: PredictedAction[], activeIndex: number, named: PredictedAction): PredictedAction[] {
-  if (options.length < 3) return [...options, named];
-  const free = options.map((_, i) => i).filter((i) => i !== activeIndex);
-  const adds = (o: PredictedAction) => o.addElements.filter((e) => e.kind !== "arrow").length;
-  const target =
-    free.find((i) => adds(options[i]) === 1) ??
-    free.find((i) => options[i].tier === "cluster") ??
-    free[free.length - 1];
-  return options.map((o, i) => (i === target ? named : o));
+export function appendContextOption(options: PredictedAction[], named: PredictedAction): PredictedAction[] {
+  if (options.length === 0 || options.length > 3 || options.some((o) => o.id === named.id)) return options;
+  return [...options, named];
 }
 
 export { OPTION_TIERS };

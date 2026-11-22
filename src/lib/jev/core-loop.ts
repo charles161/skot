@@ -105,6 +105,16 @@ const ACRONYMS = new Set(
 const PERSON_WORDS = new Set(
   "user users customer customers client clients actor admin person people visitor shopper buyer seller driver rider operator member guest".split(" ")
 );
+/** Product names people type in lower case, with the capitals they are written with. */
+const PRODUCT_NAMES: Record<string, string> = Object.fromEntries(
+  (
+    "DynamoDB MongoDB MySQL PostgreSQL SQLite GraphQL gRPC WebSocket WebSockets OpenAI BigQuery ClickHouse CockroachDB " +
+    "InfluxDB CouchDB ZooKeeper NGINX OAuth GitHub GitLab YouTube iOS macOS RabbitMQ CloudFront CloudFlare TimescaleDB " +
+    "OpenSearch Elasticsearch PayPal SendGrid PagerDuty JavaScript TypeScript WebRTC"
+  )
+    .split(" ")
+    .map((name) => [name.toLowerCase(), name])
+);
 const SMALL_WORDS = new Set("a an and as at by for from in of on or the to via with".split(" "));
 /** Up to this many words is a name (Title Case, a shape and a role from its words); more is a sentence. */
 const NAME_WORDS = 3;
@@ -128,6 +138,7 @@ export function typedNodeLabel(text: string): string {
       const bare = word.toLowerCase().replace(/[^a-z0-9]/g, "");
       if (ACRONYMS.has(bare)) return word.toUpperCase();
       if (/[A-Z]/.test(word)) return word;
+      if (PRODUCT_NAMES[word]) return PRODUCT_NAMES[word];
       if (i > 0 && (sentence || SMALL_WORDS.has(word))) return word;
       return cleanSemanticLabel(word) || word;
     })
@@ -174,14 +185,16 @@ interface Flow {
 
 /**
  * How usual an arrow from `from` to `to` is: the catalog draws exactly this link (9), the usual next step by
- * role where `from` is known to feed that kind of node (7) or by role alone (6), a looser but sound pairing
- * (4), nothing (0). Depends only on the two names and kinds.
+ * role where `from` is known to feed that kind of node (7) or by role alone (6), two nodes of one kind (7), a
+ * looser but sound pairing (4), nothing (0). Depends only on the two names and kinds.
  */
 function flow(from: LabeledNode, to: LabeledNode): Flow {
   const a = flowRole(from) ? componentForLabel(from.label) : null;
   const b = flowRole(to) ? componentForLabel(to.label) : null;
   const direct = a && b ? a.links.find((l) => l.key === b.key && !l.viaUpstream) : undefined;
   if (direct) return { strength: 9, label: direct.edge };
+  // Two nodes of one kind under different names ("Notification Service", "Email Sender") belong together.
+  if (a && b && a.key === b.key && norm(from.label) !== norm(to.label)) return { strength: 7 };
   const ra = flowRole(from);
   const rb = flowRole(to);
   if (!ra || !rb) return { strength: 0 };
@@ -260,10 +273,13 @@ function freeSlotBeside(anchor: Anchor, size: { width: number; height: number },
   const own = a.x + (a.width - size.width) / 2;
   const far = sideX(anchor.side, 2);
   const back = sideX(other, 1);
+  // A stack is a column: under the anchor, then under that, before anywhere else.
   const first: Array<[x: number, rows: number[], adjacent?: boolean]> = anchor.stack
     ? [
-        [own, [1, -1], true],
+        [own, [1], true],
+        [own, [2, 3]],
         [flow, [0], true],
+        [own, [-1], true],
       ]
     : [
         [flow, [0], true],
@@ -300,7 +316,8 @@ export function slotBeside(anchor: JevElement, size: { width: number; height: nu
   return freeSlotBeside({ id: anchor.id, rect, side: "right" }, size, elements).at;
 }
 
-function freeSpotAround(center: Point, size: { width: number; height: number }, elements: JevElement[]): Point {
+/** The free spot nearest a point: centred on it when that is free, else the closest free slot around it. */
+export function freeSpotAround(center: Point, size: { width: number; height: number }, elements: JevElement[]): Point {
   const origin: Rect = { x: center.x - 0.5, y: center.y - 0.5, width: 1, height: 1 };
   const obstacles = elements.filter(isObstacle).map(obstacleRect);
   const centred = { x: Math.round(center.x - size.width / 2), y: Math.round(center.y - size.height / 2) };

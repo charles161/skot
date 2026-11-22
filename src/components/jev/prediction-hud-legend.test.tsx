@@ -29,6 +29,22 @@ describe("the key legend says what Enter and Tab will do", () => {
     expect(legend(html)).toBe("Enter ↵ connect · Tab next option · Esc dismiss");
     expect(text(html)).toMatch(/Connect or grow/);
   });
+  // Round-2 judge, prod: with option 2 highlighted the hint still said "Connect API Gateway? Enter accepts".
+  it("the hint above the panel follows the highlighted option", () => {
+    const intent = { kind: "domain_continue" as const, headline: "Connect API Gateway?", detail: "Enter accepts, typing skips", relatedIds: [], timestamp: 1 };
+    const panel = { ...base, intent, predictions: [link, { ...node("Auth Service"), title: "Auth Service" }, node("c")] };
+    expect(text(renderToStaticMarkup(<PredictionHud {...panel} />))).toMatch(/Connect API Gateway\?/);
+    const moved = text(renderToStaticMarkup(<PredictionHud {...panel} activeIndex={1} />));
+    expect(moved).toMatch(/Enter adds Auth Service/);
+    expect(moved).not.toMatch(/Connect API Gateway\?/);
+  });
+
+  it("lays four options out in four columns when the AI has added one", () => {
+    const html = renderToStaticMarkup(<PredictionHud {...base} predictions={[node("a"), node("b"), node("c"), node("d")]} />);
+    expect(html).toMatch(/sm:grid-cols-4/);
+    expect(html.match(/aria-pressed/g)).toHaveLength(4);
+  });
+
   // Judge on prod, 22 Nov: the chip said "ranked by jev" while jev's pick sat second.
   it("says jev scored the options, not that it ranked them: the order is the board's", () => {
     const scored = [node("a"), { ...node("b"), probability: 0.63 }, node("c")];

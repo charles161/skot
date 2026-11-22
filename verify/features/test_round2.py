@@ -63,6 +63,21 @@ def test_type_anywhere(page, skot, evidence):
     assert not skot.arrows(), "nothing may be connected by typing: %s" % arrows_named(els)
     assert not overlapping_pairs(els)
 
+    # Round-2 judge, prod, machine speed: click a node, type with no delay between keys and press Enter at once.
+    # The name came out scrambled ("Rdise"), and the click's own late suggestions replaced the new node's.
+    page.keyboard.press("Escape")
+    click_node(skot, "API Gateway")
+    page.keyboard.type("kafka", delay=0)
+    page.keyboard.press("Enter")
+    els = board(skot, 5)
+    page.wait_for_timeout(1500)
+    assert "Kafka" in [e["label"] for e in els if is_shape(e)], "typed at machine speed the name must still be Kafka: %s" % [e["label"] for e in by_creation(els)]
+    first = read_options(page)[0]
+    shot(page, evidence, "type-anywhere", "2b-machine-speed")
+    assert "Kafka" in first["title"] and "→" in first["title"], "the suggestions must still be the new node's connections: %s" % first
+    page.keyboard.press("Escape")
+    skot.clear()
+
     # Second judge, prod: click App, type cachr, Backspace: the App node was deleted.
     page.keyboard.press("Escape")
     click_node(skot, "App")
@@ -70,7 +85,7 @@ def test_type_anywhere(page, skot, evidence):
     page.keyboard.press("Backspace")
     page.wait_for_timeout(500)
     assert bar_of(page).input_value() == "cach", "Backspace should edit the typed text: %r" % bar_of(page).input_value()
-    assert len(skot.shapes()) == 4 and "App" in [e["label"] for e in skot.shapes()], "Backspace deleted a node"
+    assert len(skot.shapes()) == 5 and "App" in [e["label"] for e in skot.shapes()], "Backspace deleted a node"
     page.keyboard.press("Escape")
     assert bar_of(page).input_value() == ""
 
@@ -143,10 +158,10 @@ def test_ai_on_demand(page, skot, evidence):
     assert (calls[0].get("context") or {}).get("subjectLabel") == "App", "the one call must carry the board context: %s" % calls[0].get("context")
     opts = read_options(page)
     titles = [o["title"] for o in opts]
-    assert len(opts) == 3 and opts[0]["active"], opts
-    ctx = [o for o in opts if "Thumbnail Worker" in o["title"]]
-    assert ctx and not ctx[0]["active"], "the board-named node should be offered beside the highlighted option, not instead of it: %s" % titles
-    assert "jev" in (ctx[0]["pct"] or ""), "jev's pick should be marked: %s" % ctx[0]
+    assert len(opts) == 4 and opts[0]["active"], opts
+    assert "Thumbnail Worker" in opts[3]["title"], "the board-named node is added after the three options, never in place of one: %s" % titles
+    assert [o["tier"] for o in opts[:3]] == ["minimal", "cluster", "full"], "the three local options must stay as they were: %s" % titles
+    assert "jev" in (opts[3]["pct"] or ""), "jev's pick should be marked: %s" % opts[3]
 
     page.keyboard.type("api gateway", delay=60)
     page.wait_for_timeout(1200)

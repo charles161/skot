@@ -48,7 +48,8 @@ def ai(page, new_page):
             elif body.get("mode") == "rank_actions":
                 ids = [c["id"] for c in body.get("candidates", [])]
                 probs = {cid: (0.9 if i == len(ids) - 1 else 0.1 / max(1, len(ids) - 1)) for i, cid in enumerate(ids)}
-                answer = dict(JEV, nextActionProbabilities=probs)
+                named = [{"id": "ctx_0", "label": "Thumbnail Worker", "kind": "node", "edgeLabel": "resizes"}]
+                answer = dict(JEV, nextActionProbabilities=probs, contextSuggestions=named)
             else:
                 route.continue_()
                 return
@@ -289,6 +290,14 @@ def loop_result(page, skot, settle_ms):
     page.keyboard.press("Enter")
     els = skot.wait_state(lambda es: len([e for e in es if e.get("kind") == "arrow"]) >= 1, what="the accepted suggestion")
     page.wait_for_timeout(400)
+    # Second-round judge, prod: "Tab, Enter" added a different node once the AI had answered.
+    before = len(skot.elements())
+    type_enter(page, "worker", settle_ms=settle_ms)
+    page.wait_for_timeout(settle_ms + 300)
+    page.keyboard.press("Tab")
+    page.keyboard.press("Enter")
+    els = skot.wait_state(lambda es: len(es) > before + 1, what="Tab, Enter to take the second option")
+    page.wait_for_timeout(400)
     els = skot.elements()
     ordered = by_creation(els)
     o = ordered[0]
@@ -319,7 +328,7 @@ def test_core_loop_ai_optional(page, skot, new_page, evidence, base_url, ai):
     assert "deciding" not in panels["fail"], "the panel still says deciding after the AI failed: %r" % panels["fail"][:200]
     assert "scored by jev" in panels["ok"] and "jev pick" in panels["ok"], "jev's score should show when it answers: %r" % panels["ok"][:200]
     first = results["ok"]
-    assert len(first["nodes"]) == 4 and len(first["arrows"]) == 1, first
+    assert len(first["nodes"]) >= 5 and len(first["arrows"]) >= 1, first
     for mode, got in results.items():
         assert got == first, "the board differs when the AI is %r:\n%s\n%s" % (mode, got, first)
     # The page fixture's own tab is unused; the failures the "fail" visitor logs are the point of the test.

@@ -91,6 +91,13 @@ export function PredictionHud({
     (isJevModelSource(telemetry?.source) || telemetry?.source === "llm-json") &&
     telemetry?.isHeuristic !== true;
   const legend = keyLegend(typing, completion, predictions[activeIndex], activeIndex);
+  // The hint follows the highlight: once the user has moved it, it names what Enter does now.
+  const moved = activeIndex > 0 ? predictions[activeIndex] : undefined;
+  const hint = moved
+    ? { headline: `Enter ${moved.addElements.some((e) => e.kind !== "arrow") ? "adds" : "connects"} ${moved.title}`, detail: "" }
+    : intent
+      ? { headline: intent.headline, detail: intent.detail }
+      : null;
   const heading = typing
     ? "Add it, or go bigger"
     : predictions.some((p) => p.category === "connect" && !p.tier)
@@ -157,21 +164,27 @@ export function PredictionHud({
     <div
       role="region"
       aria-label="Predictive drafting suggestions"
-      className="pointer-events-auto flex w-full max-w-[min(780px,100vw)] flex-col items-center gap-2 px-3"
+      className={`pointer-events-auto flex w-full flex-col items-center gap-2 px-3 ${
+        predictions.length > 3 ? "max-w-[min(980px,100vw)]" : "max-w-[min(780px,100vw)]"
+      }`}
     >
       {/* Compact Spatial Intent Understanding Pill */}
-      {intent && (
+      {hint && (
         <div className="jev-glass inline-flex max-w-full items-center gap-2 rounded-full px-3.5 py-1.5 text-xs shadow-sm">
           <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#D94E28]/15 text-[#C2411D] dark:text-[#FF8562]">
             <IconSpark className="h-2.5 w-2.5" aria-hidden="true" />
           </span>
           <span className="truncate font-medium text-foreground">
-            {intent.headline}
+            {hint.headline}
           </span>
-          <span className="hidden text-muted-foreground sm:inline">·</span>
-          <span className="hidden truncate font-mono text-[11px] text-muted-foreground sm:inline">
-            {intent.detail}
-          </span>
+          {hint.detail && (
+            <>
+              <span className="hidden text-muted-foreground sm:inline">·</span>
+              <span className="hidden truncate font-mono text-[11px] text-muted-foreground sm:inline">
+                {hint.detail}
+              </span>
+            </>
+          )}
         </div>
       )}
 
@@ -226,7 +239,11 @@ export function PredictionHud({
             </div>
           </div>
 
-          <div className={`grid grid-cols-1 gap-1.5 ${predictions.length > 1 ? "sm:grid-cols-3" : ""}`}>
+          <div
+            className={`grid grid-cols-1 gap-1.5 ${
+              predictions.length > 3 ? "sm:grid-cols-4" : predictions.length > 1 ? "sm:grid-cols-3" : ""
+            }`}
+          >
             {predictions.map((pred, idx) => {
               const isActive = idx === activeIndex;
               // The order and the highlight are the board's; jev's pick alone carries its percentage.
