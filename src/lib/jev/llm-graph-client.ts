@@ -49,7 +49,7 @@ const HAIKU_MODEL = "anthropic/claude-haiku-5.5";
 /**
  * The model each gateway route uses, pinned by a unit test. Haiku won the 22 Nov 2026 model eval on the short-output
  * routes. Fork uses it for quality, at slightly lower validity than gpt-4.1-mini (numbers at the pin test).
- * next_options and generate_graph stay on gpt-4.1-mini: Haiku overruns their length caps.
+ * generate_graph stays on gpt-4.1-mini: Haiku overruns its length cap.
  * Env overrides: AI_GATEWAY_MODEL_<ROUTE> (e.g. AI_GATEWAY_MODEL_MORPH) for one route, AI_GATEWAY_MODEL for all.
  */
 export const LLM_ROUTE_MODELS = {
@@ -57,7 +57,6 @@ export const LLM_ROUTE_MODELS = {
   practice_review: HAIKU_MODEL,
   moves: HAIKU_MODEL,
   morph: HAIKU_MODEL,
-  next_options: DEFAULT_AI_GATEWAY_MODEL,
   fork: HAIKU_MODEL,
   generate_graph: DEFAULT_AI_GATEWAY_MODEL,
 } as const satisfies Record<string, string>;
@@ -573,86 +572,4 @@ export async function generatePracticeReviewWithLlm(params: {
     .slice(0, MAX_COMMENTS);
   if (comments.length < 2) return null;
   return { comments, model: result.model, latencyMs: result.latencyMs, inputTokens: result.inputTokens };
-}
-
-const OPTION_GRAPH_KINDS = ["node", "database", "cache", "queue", "lb", "blob", "external", "actor", "diamond"] as const;
-
-const optionGraphSchema = z
-  .object({
-    nodes: z
-      .array(
-        z.object({
-          label: z.string().trim().min(1).max(40),
-          kind: z.enum(OPTION_GRAPH_KINDS),
-          sublabel: z.string().trim().max(48).optional(),
-        })
-      )
-      .min(1)
-      .max(12),
-    edges: z
-      .array(
-        z.object({
-          from: z.string().trim().min(1).max(40),
-          to: z.string().trim().min(1).max(40),
-          label: z.string().trim().max(24).optional(),
-        })
-      )
-      .max(20),
-  })
-  .strip();
-
-const optionGraphsSchema = z
-  .object({ cluster: optionGraphSchema.optional(), full: optionGraphSchema.optional() })
-  .strip()
-  .refine((g) => g.cluster || g.full, "no graphs");
-
-export type OptionGraph = z.infer<typeof optionGraphSchema>;
-
-const OPTION_GRAPHS_PROMPT = `You extend a system-design whiteboard. Return ONLY JSON {"cluster":{"nodes":[{"label":string,"kind":${OPTION_GRAPH_KINDS.map((k) => `"${k}"`).join("|")},"sublabel"?:string}],"edges":[{"from":label,"to":label,"label"?:string}]},"full":{same shape}}. cluster = the concept plus 2-3 NEW companion nodes it talks to directly (3-4 new nodes, the anchor not counted). full = the complete architecture around the concept: 7-10 NEW nodes (services, data stores, caches, queues, workers), a real production design, not a list of generic services. Both MUST include the concept node and connect to the anchor node (use the anchor's exact label as an edge endpoint, do not add it as a new node). Reuse the exact label of any node already on the board instead of inventing a duplicate. Labels: specific, 1-3 words, max 40 chars. Edge labels: short verbs (HTTPS, reads, publishes). Kinds: lb=gateway/load balancer/CDN, cache, queue=queue/stream/bus, database, blob=object storage, external=third-party, actor=user/client, node=service. "baseline" lists the node names of a decent default for each option: start from it and adapt it to this board and what the user typed (rename to fit, swap pieces that do not fit, add what is missing); never return fewer nodes than the baseline. "baseline.edges" is a sound wiring for the full option: keep its direction and structure (a cache sits on the caller's read path, in front of the database; replicas and backups receive data FROM the primary), and give every edge a short distinct label. When several nodes are selected, the concept is the node that ties them together. When the concept is a whole system (for example "URL shortener"), its nodes are that system's components: never add a node named after the system itself, and never combine labels with "+".`;
-
-/**
- * Names and shapes the cluster and full next-action options for a concept on the current board.
- * Returns null on any failure so the deterministic catalog options stand.
- */
-export async function proposeOptionGraphsWithLlm(params: {
-  auth: GatewayAuth;
-  request: {
-    text?: string;
-    conceptLabel: string;
-    anchorLabel?: string;
-    selectedLabels: string[];
-    boardLabels: string[];
-    baseline?: { cluster: string[]; full: string[]; edges?: string[] };
-  };
-}): Promise<{ graphs: { cluster?: OptionGraph; full?: OptionGraph }; model: string; latencyMs: number } | null> {
-  const result = await requestStructuredJsonFromLlm({
-    auth: params.auth,
-    route: "next_options",
-    timeoutMs: 5000,
-    maxTokens: 900,
-    systemPrompt: OPTION_GRAPHS_PROMPT,
-    userPayload: {
-      task: "next_options",
-      concept: params.request.conceptLabel,
-      ...(params.request.text ? { typed: params.request.text } : {}),
-      ...(params.request.anchorLabel ? { anchor: params.request.anchorLabel } : {}),
-      selected: params.request.selectedLabels,
-      board: params.request.boardLabels,
-      ...(params.request.baseline ? { baseline: params.request.baseline } : {}),
-    },
-  });
-  if (!result) return null;
-  let decoded: unknown;
-  try {
-    decoded = parseJsonBody(result.content);
-  } catch {
-    logServerEvent("warn", { route: "ai-gateway", event: "option_graphs_json_parse_failed", latencyMs: result.latencyMs });
-    return null;
-  }
-  const validated = optionGraphsSchema.safeParse(decoded);
-  if (!validated.success) {
-    logServerEvent("warn", { route: "ai-gateway", event: "option_graphs_validation_failed", latencyMs: result.latencyMs });
-    return null;
-  }
-  return { graphs: validated.data, model: result.model, latencyMs: result.latencyMs };
 }

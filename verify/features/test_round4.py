@@ -3,6 +3,7 @@
 1A  Enter on the empty bar accepts only a connection of the node just added. Any other suggestion needs Tab first.
 5A  On a phone the text stays readable and the view pans to the newest node; it does not zoom out to fit the board.
 8A  When a Fork take renames the selected node, its arrows stay on that node (test_fork_rename.py).
+4A  The dead per-keystroke next_options mode is deleted from the server.
 """
 import json
 import re
@@ -153,4 +154,25 @@ def test_phone_pans(browser, server, base_url, evidence):
         assert_no_console_errors(evidence)
     finally:
         ctx.close()
+
+
+OLD_KEYSTROKE_REQUEST = {
+    "mode": "next_options", "trigger": "type", "text": "apigateway", "conceptLabel": "API Gateway",
+    "anchorLabel": "Client Dashboard", "selectedLabels": [], "boardLabels": ["Client Dashboard"],
+    "options": [
+        {"id": "minimal", "title": "API Gateway", "description": "Client Dashboard to API Gateway", "nodes": 1},
+        {"id": "cluster", "title": "API Gateway + Auth Service + Core Service", "description": "linked from Client Dashboard", "nodes": 3},
+        {"id": "full", "title": "Full API backend", "description": "API Gateway, Auth Service, Core Service", "nodes": 9},
+    ],
+}
+
+
+@check("keystroke-route-removed")
+def test_keystroke_route_removed(page, skot, evidence, base_url):
+    """4A. The request the app used to send on every keystroke is no longer a mode the server knows."""
+    skot.new_board()
+    res = page.request.post(base_url.rstrip("/") + "/api/jev/decide", data=json.dumps(OLD_KEYSTROKE_REQUEST),
+                            headers={"content-type": "application/json"})
+    evidence.note(status=res.status, body=res.text()[:200])
+    assert res.status == 400, "next_options must be rejected as an unknown mode, got %d: %s" % (res.status, res.text()[:200])
 

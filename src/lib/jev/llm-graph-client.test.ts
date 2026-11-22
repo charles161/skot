@@ -8,7 +8,6 @@ import {
   generateSemanticGraphWithLlm,
   LLM_ROUTE_MODELS,
   proposeContextNodesWithLlm,
-  proposeOptionGraphsWithLlm,
   requestStructuredJsonFromLlm,
   resolveGatewayAuth,
   type GatewayAuth,
@@ -553,7 +552,8 @@ describe("llm-graph-client: per-route model selection", () => {
   // Model eval 22 Nov 2026 (evals/models/RESULTS.md on branch model-eval): Haiku 5.5 wins context, practice review,
   // moves and morph. Fork is not 100% valid on Haiku, as 86ec8d5 said from its first 20 calls: on answers generated
   // after the validator fix it is 67/70 valid vs 68/70 for gpt-4.1-mini, judge 8.1 vs 5.3. Charles kept Haiku and
-  // waived "at least as valid" (decision 7A, 22 Nov 2026). next_options and generate keep gpt-4.1-mini.
+  // waived "at least as valid" (decision 7A, 22 Nov 2026). generate keeps gpt-4.1-mini. next_options was deleted
+  // with its route (decision 4A, 22 Nov 2026).
   // Changing a route's model needs a re-run of that eval, then this pin.
   it("pins the model every gateway route uses", () => {
     expect(DEFAULT_AI_GATEWAY_MODEL).toBe("openai/gpt-4.1-mini");
@@ -562,7 +562,6 @@ describe("llm-graph-client: per-route model selection", () => {
       practice_review: "anthropic/claude-haiku-5.5",
       moves: "anthropic/claude-haiku-5.5",
       morph: "anthropic/claude-haiku-5.5",
-      next_options: "openai/gpt-4.1-mini",
       fork: "anthropic/claude-haiku-5.5",
       generate_graph: "openai/gpt-4.1-mini",
     });
@@ -588,10 +587,6 @@ describe("llm-graph-client: per-route model selection", () => {
           boardGraph: {},
           selection: { actors: [], messages: [] },
         }),
-    ],
-    [
-      "next_options",
-      () => proposeOptionGraphsWithLlm({ auth: TEST_AUTH, request: { conceptLabel: "Cache", selectedLabels: [], boardLabels: [] } }),
     ],
     ["fork", () => generateForkTakesWithLlm({ auth: TEST_AUTH, selectedIds: ["a"], boardGraph: {} })],
     ["generate_graph", () => generateSemanticGraphWithLlm({ auth: TEST_AUTH, prompt: "url shortener" })],

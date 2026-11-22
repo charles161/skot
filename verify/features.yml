@@ -130,6 +130,14 @@ features:
       - src/lib/jev/geometry.ts
       - src/components/jev/JevWorkspace.tsx
 
+  - id: keystroke-route-removed
+    title: "4A: the per-keystroke next_options mode is gone from the server; the request the app used to send on
+      every keystroke is rejected as an unknown mode"
+    check: keystroke-route-removed
+    sources:
+      - src/app/api/jev/decide/route.ts
+      - src/lib/jev/llm-graph-client.ts
+
   - id: call-budget
     title: "Drawing does not drain the AI budget: nothing is asked while a shape, label or arrow is in progress; a
       settled add, arrow, click or drag costs one call; a 6-node, 5-arrow board drawn quickly costs at most 3, and

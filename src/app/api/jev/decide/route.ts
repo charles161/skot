@@ -11,10 +11,8 @@ import {
   generatePracticeReviewWithLlm,
   generateSemanticGraphWithLlm,
   proposeContextNodesWithLlm,
-  proposeOptionGraphsWithLlm,
   resolveGatewayAuth,
 } from "@/lib/jev/llm-graph-client";
-import { OPTION_TIERS } from "@/lib/jev/types";
 import type { ContextSuggestion } from "@/lib/jev/prediction-engine";
 import { PRACTICE_PROMPT_IDS } from "@/lib/jev/practice-prompts";
 import { MAX_COMMENT_CHARS, MAX_COMMENTS, RUBRIC_KEYS } from "@/lib/jev/practice-review";
@@ -195,40 +193,6 @@ const morphNotationRequestSchema = z
   })
   .strict();
 
-const label80 = z.string().trim().min(1).max(80);
-const nextOptionsSchema = z
-  .object({
-    mode: z.literal("next_options"),
-    trigger: z.enum(["type", "select", "multi"]),
-    text: z.string().trim().max(120).optional(),
-    conceptLabel: label80,
-    anchorLabel: label80.optional(),
-    selectedLabels: z.array(label80).max(8),
-    boardLabels: z.array(label80).max(40),
-    options: z
-      .array(
-        z
-          .object({
-            id: z.enum(OPTION_TIERS),
-            title: z.string().trim().min(1).max(120),
-            description: z.string().trim().max(140),
-            nodes: z.number().int().min(0).max(40),
-          })
-          .strict()
-      )
-      .length(3)
-      .refine((opts) => opts.map((o) => o.id).join() === OPTION_TIERS.join(), "one option per tier, small to big"),
-    baseline: z
-      .object({
-        cluster: z.array(label80).max(12),
-        full: z.array(label80).max(16),
-        edges: z.array(z.string().trim().min(1).max(120)).max(20).optional(),
-      })
-      .strict()
-      .optional(),
-  })
-  .strict();
-
 const practiceReviewRequestSchema = z
   .object({
     mode: z.literal("practice_review"),
@@ -259,7 +223,6 @@ const practiceReviewRequestSchema = z
   .strict();
 
 const decideRequestSchema = z.discriminatedUnion("mode", [
-  nextOptionsSchema,
   rankActionsSchema,
   classifyPromptSchema,
   placeDiagramSchema,
@@ -402,84 +365,6 @@ export async function POST(request: NextRequest) {
         { headers: rateHeaders }
       );
     }
-  }
-
-  // MODE 0: Rank the three tiered next-action options (jev) and shape (b) and (c) with the Gateway LLM
-  if (input.mode === "next_options") {
-    const tryBudget = () => {
-      const budget = getDecideUpstreamBudget().tryConsume();
-      if (!budget.allowed) {
-        logServerEvent("warn", {
-          route: ROUTE,
-          method: "POST",
-          mode: input.mode,
-          event: "upstream_budget_exhausted",
-          status: 200,
-          degraded: true,
-          errorClass: budget.reason,
-        });
-      }
-      return budget.allowed;
-    };
-    const startedAt = performance.now();
-    const where = input.anchorLabel ? ` next to "${input.anchorLabel}"` : " on a blank board";
-    const typed = input.text ? `The user typed "${input.text}"` : input.trigger === "multi" ? `The user selected ${input.selectedLabels.join(", ")}` : `The user selected "${input.conceptLabel}"`;
-
-    const jevPromise = jevTransport && tryBudget()
-      ? callTypeSafeJev(
-          {
-            state: {
-              board: input.boardLabels,
-              ...(input.anchorLabel ? { anchor: input.anchorLabel } : {}),
-              ...(input.text ? { typed: input.text } : {}),
-              concept: input.conceptLabel,
-            },
-            questions: {
-              next_option: {
-                type: "choice",
-                instructions: `${typed}${where} of a system-design whiteboard. Which of these three next actions does the user most likely want right now? Prefer the smallest option unless the board or the text clearly asks for more.`,
-                criteria: Object.fromEntries(
-                  input.options.map((o) => [o.id, `${o.title} (${o.nodes === 0 ? "a link only" : `adds ${o.nodes} node${o.nodes === 1 ? "" : "s"}`}): ${o.description}`])
-                ),
-              },
-            },
-          },
-          jevTransport
-        ).catch((err: unknown) => {
-          const classified = classifyServerError(err);
-          logServerEvent("error", {
-            route: ROUTE,
-            method: "POST",
-            mode: input.mode,
-            event: "upstream_fallback",
-            status: 200,
-            degraded: true,
-            latencyMs: err instanceof TypeSafeApiError ? err.latencyMs : Math.max(1, Math.round(performance.now() - startedAt)),
-            ...classified,
-          });
-          return { degradedReason: jevDegradedReason(jevTransport, classified) };
-        })
-      : Promise.resolve(null);
-    const llmPromise = gatewayAuth && tryBudget()
-      ? proposeOptionGraphsWithLlm({ auth: gatewayAuth, request: input })
-      : Promise.resolve(null);
-
-    const [jev, llm] = await Promise.all([jevPromise, llmPromise]);
-    const jevOk = jev && "response" in jev ? jev : null;
-    const choice = jevOk?.response.answers.next_option as ChoiceAnswer | undefined;
-    const probabilities = choice?.probabilities ?? null;
-    const payload = {
-      source: jevOk && probabilities ? jevOk.source : ("heuristic" as const),
-      model: jevOk?.response.model ?? "heuristic",
-      isHeuristic: !(jevOk && probabilities),
-      latencyMs: Math.max(1, Math.round(performance.now() - startedAt)),
-      probabilities,
-      graphs: llm?.graphs ?? null,
-      ...(llm ? { graphModel: llm.model } : {}),
-      ...(jev && "degradedReason" in jev ? { degraded: true, degradedReason: jev.degradedReason } : {}),
-    };
-    if (cacheKey && (probabilities || llm)) cache.set(cacheKey, payload);
-    return jsonNoStore(payload, { headers: rateHeaders });
   }
 
   // MODE 1: Rank candidate next whiteboard actions & classify drag intent in parallel

@@ -14,7 +14,6 @@ export function useAiQuiet(): boolean {
 }
 
 export const DECIDE_MODES = [
-  "next_options",
   "rank_actions",
   "classify_prompt",
   "place_diagram",

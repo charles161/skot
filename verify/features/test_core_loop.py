@@ -43,9 +43,7 @@ def ai(page, new_page):
                 body = json.loads(route.request.post_data or "{}")
             except ValueError:
                 body = {}
-            if body.get("mode") == "next_options":
-                answer = dict(JEV, probabilities={"minimal": 0.04, "cluster": 0.06, "full": 0.9}, graphs=None)
-            elif body.get("mode") == "rank_actions":
+            if body.get("mode") == "rank_actions":
                 ids = [c["id"] for c in body.get("candidates", [])]
                 probs = {cid: (0.9 if i == len(ids) - 1 else 0.1 / max(1, len(ids) - 1)) for i, cid in enumerate(ids)}
                 named = [{"id": "ctx_0", "label": "Thumbnail Worker", "kind": "node", "edgeLabel": "resizes"}]

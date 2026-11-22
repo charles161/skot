@@ -248,12 +248,6 @@ def test_ghost_predictions(page, skot, evidence):
 
 # ------------------------------------------------------------------ next-action options (3 tiers, small to big)
 
-# CI has no AI keys, so the jev ranking is a fixed answer here; SKOT_REAL_AI=1 sends it to the real server
-# (jev through the AI Gateway plus the Gateway LLM) instead.
-NEXT_OPTIONS_FIXTURE = {
-    "source": "gateway:typesafe-ai/jev", "model": "typesafe-ai/jev", "isHeuristic": False, "latencyMs": 120,
-    "probabilities": {"minimal": 0.84, "cluster": 0.11, "full": 0.05}, "graphs": None,
-}
 TIERS = ["minimal", "cluster", "full"]
 READ_OPTIONS_JS = """() => {
   const r = document.querySelector('[role=region][aria-label="Predictive drafting suggestions"]');
@@ -281,20 +275,9 @@ READ_GHOSTS_JS = """() => ({
 
 
 def ai_mode(page):
-    if os.environ.get("SKOT_REAL_AI") == "1":
-        return "real"
-
-    def handle(route):
-        try:
-            body = json.loads(route.request.post_data or "{}")
-        except ValueError:
-            body = {}
-        if body.get("mode") == "next_options":
-            route.fulfill(status=200, content_type="application/json", body=json.dumps(NEXT_OPTIONS_FIXTURE))
-        else:
-            route.continue_()
-    page.route("**/api/jev/decide", handle)
-    return "mocked"
+    """Which AI these checks ran against: the real one (SKOT_REAL_AI=1) or whatever the server under test has
+    (none in CI, where the options are the local ones)."""
+    return "real" if os.environ.get("SKOT_REAL_AI") == "1" else "server"
 
 
 def read_options(page, wait_s=12.0):
