@@ -88,6 +88,39 @@ features:
       - src/components/jev/ThoughtBar.tsx
       - src/components/jev/PredictionHud.tsx
 
+  - id: type-anywhere
+    title: "1A: letters typed anywhere on the board go to the Thought Bar (empty board, after clicking a node:
+      the node lands beside it, Backspace edits the text); tools are on Alt+letter and their buttons, Fork It on
+      Alt+F and its button"
+    check: type-anywhere
+    sources:
+      - src/components/jev/JevWorkspace.tsx
+      - src/components/jev/ThoughtBar.tsx
+
+  - id: ai-on-demand
+    title: "5A: typing never calls the AI; adding or clicking a node makes one call that carries the board context,
+      and the board-named next node is offered beside the highlighted option, scored by jev"
+    check: ai-on-demand
+    sources:
+      - src/components/jev/JevWorkspace.tsx
+      - src/components/jev/PredictionHud.tsx
+      - src/app/api/jev/decide/route.ts
+
+  - id: first-screen
+    title: "6A: the first screen is the bar and one Examples button; starters, practice and starter boards are
+      behind it; typing a name still just works"
+    check: first-screen
+    sources:
+      - src/components/jev/FirstRunEmptyState.tsx
+
+  - id: phone-chips
+    title: "7A: on a phone the suggestions are one row of chips above the bar, the dock covers at most a quarter of
+      the screen, new nodes stay on screen, and a tap on a chip accepts it"
+    check: phone-chips
+    sources:
+      - src/components/jev/PredictionHud.tsx
+      - src/components/jev/ThoughtBar.tsx
+
   - id: ghost-predictions
     title: Tab cycles the three ghost predictions and Enter materializes the active one
     check: ghost-predictions
