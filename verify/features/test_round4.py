@@ -9,7 +9,7 @@ import json
 import re
 
 from conftest import assert_no_console_errors, check
-from driver import Driver, is_shape
+from driver import Driver, is_shape, overlapping_pairs
 from test_core_loop import JEV, ai, arrows_named, bar_of, board, by_creation, type_enter  # noqa: F401 (ai is a fixture)
 from test_features import SUGGESTIONS, ghosts, read_options, shot
 
@@ -26,6 +26,62 @@ def legend(page):
 
 def highlighted(page):
     return [o["title"] for o in read_options(page) if o["active"]]
+
+
+def assert_hint_honest(page, when):
+    """With nothing highlighted Enter does nothing, so no text near the suggestions may say that it does."""
+    region = page.locator(SUGGESTIONS)
+    if region.count() == 0:
+        return
+    text = " ".join(region.inner_text().split())
+    if not highlighted(page):
+        lies = [w for w in ("Enter accepts", "Enter adds", "Enter connects", "Enter draws", "Enter ↵") if w in text]
+        assert not lies, "%s: nothing is highlighted, yet the panel says %s: %r" % (when, lies, text[:160])
+
+
+@check("hint-never-lies")
+def test_hint_never_lies(page, skot, evidence, ai):
+    """Judge A, round 4 (twice): after an accepted connection, and after a Tab-picked bigger option, the pill
+    still read "Connect API Gateway? Enter accepts" / "Enter adds API Gateway" while Enter did nothing."""
+    ai(page, "ok")
+    skot.new_board()
+    type_enter(page, "app")
+    type_enter(page, "api gateway")
+    board(skot, 2)
+    page.wait_for_timeout(600)
+    assert highlighted(page), "the offered connection is highlighted"
+    for option in (2, 3):
+        page.keyboard.press("Tab")
+    page.wait_for_timeout(200)
+    n = len([e for e in skot.elements() if is_shape(e)])
+    page.keyboard.press("Enter")
+    skot.wait_state(lambda es: len([e for e in es if is_shape(e)]) > n, what="the Tab-picked bigger option")
+    page.wait_for_timeout(2500)
+    shot(page, evidence, "hint-never-lies", "1-after-bigger-option")
+    assert_hint_honest(page, "after a Tab-picked bigger option")
+    els_before = len(skot.elements())
+    page.keyboard.press("Enter")
+    page.wait_for_timeout(600)
+    assert len(skot.elements()) == els_before, "Enter with nothing highlighted added something"
+
+    type_enter(page, "postgres")
+    page.wait_for_timeout(400)
+    if highlighted(page):
+        page.keyboard.press("Enter")
+    page.wait_for_timeout(2500)
+    shot(page, evidence, "hint-never-lies", "2-after-accepted-connection")
+    assert_hint_honest(page, "after an accepted connection")
+
+    # The full stack around a node: whatever is left on screen afterwards must still be true.
+    type_enter(page, "kafka")
+    page.wait_for_timeout(300)
+    for _ in range(3):
+        page.keyboard.press("Tab")
+    page.keyboard.press("Enter")
+    page.wait_for_timeout(2500)
+    shot(page, evidence, "hint-never-lies", "3-after-full-option")
+    assert_hint_honest(page, "after the biggest option")
+    assert_no_console_errors(evidence)
 
 
 @check("enter-needs-pick")
@@ -153,6 +209,22 @@ def test_enter_needs_pick(page, skot, evidence, ai):
     new = next(e for e in els if e["id"] not in before_ids)
     assert new["label"].lower() == "2fa service", "the node is named what was typed: %r" % new["label"]
     evidence.note(nodes=labels(skot), arrows=arrows_named(els))
+
+    # 7. Judge B, second round: "app, Enter, postgres, Enter", click App, Enter within 300 ms accepted the
+    # connection still on offer for Postgres; after 600 ms the same keys did not. A click takes the offer back at once.
+    skot.new_board()
+    type_enter(page, "app")
+    type_enter(page, "postgres")
+    board(skot, 2)
+    assert highlighted(page), "the connection of Postgres is on offer"
+    app = skot.by_label("App")
+    page.mouse.click(*skot.to_screen(app["x"] + app["width"] / 2, app["y"] + app["height"] * 0.55))
+    page.keyboard.press("Enter")
+    page.wait_for_timeout(900)
+    page.keyboard.press("Escape")
+    page.keyboard.press("Escape")
+    shot(page, evidence, "enter-needs-pick", "7-click-then-enter")
+    assert arrows_named(skot.elements()) == [], "Enter right after clicking a node accepted the old offer: %s" % arrows_named(skot.elements())
     assert_no_console_errors(evidence)
 
 
@@ -199,9 +271,11 @@ def test_phone_pans(browser, server, base_url, evidence):
             x2, y2 = skot.to_screen(newest["x"] + newest["width"], newest["y"] + newest["height"], v)
             if i in (1, 5, len(names)):
                 shot(page, evidence, "phone-pans", "%d-nodes" % i)
-            assert x1 >= 0 and x2 <= PHONE["width"] and y1 >= 48 and y2 <= dock_top, \
-                "node %d (%s) is not in view after it was added: %s, dock at %d" % (
-                    i, newest["label"], (round(x1), round(y1), round(x2), round(y2)), dock_top)
+            # Judge B, second round: the header and toolbar floated over the newest node at the top of the column.
+            bars_bottom = page.evaluate("""() => Math.max(...[...document.querySelectorAll('button[aria-label*=" tool ("]')].map((b) => b.getBoundingClientRect().bottom))""")
+            assert x1 >= 0 and x2 <= PHONE["width"] and y1 >= bars_bottom and y2 <= dock_top, \
+                "node %d (%s) is not in view after it was added: %s, toolbar ends at %d, dock at %d" % (
+                    i, newest["label"], (round(x1), round(y1), round(x2), round(y2)), bars_bottom, dock_top)
         evidence.note(zooms=zooms, label_heights_px=heights, nodes=[e["label"] for e in by_creation(skot.elements())])
         assert len(set(zooms)) == 1, "adding nodes on a phone must not change the zoom: %s" % zooms
         assert zooms[0] >= 0.9, "a new board on a phone starts at a readable size: %s" % zooms[0]
@@ -252,6 +326,16 @@ def test_flow_both_ways(page, skot, evidence):
     els = skot.wait_state(lambda es: len(arrows_named(es)) == 2, what="queue -> web drawn as a second arrow")
     shot(page, evidence, "flow-both-ways", "1-there-and-back")
     assert sorted(arrows_named(els)) == [("Queue", "Web"), ("Web", "Queue")], arrows_named(els)
+    # Judge A, second round: the way back was drawn exactly on top of the way there and read as one arrow.
+    labels_at = page.evaluate("""() => [...document.querySelectorAll('[role=application] svg [data-element-id][data-kind="arrow"]')].map((g) => {
+        const t = [...g.querySelectorAll('text')].find((n) => n.textContent.trim());
+        const r = t.getBoundingClientRect();
+        return {text: t.textContent.trim(), top: r.top, bottom: r.bottom, left: r.left, right: r.right};
+    })""")
+    assert len(labels_at) == 2, labels_at
+    a, b = labels_at
+    overlap = not (a["bottom"] <= b["top"] or b["bottom"] <= a["top"] or a["right"] <= b["left"] or b["right"] <= a["left"])
+    assert not overlap, "there and back must read as two arrows, each with its own label in the clear: %s" % labels_at
     assert {e["id"]: (e["x"], e["y"]) for e in els if is_shape(e)} == nodes, "the way back must not add or move nodes"
 
     page.keyboard.type("web -> queue", delay=25)
@@ -262,7 +346,41 @@ def test_flow_both_ways(page, skot, evidence):
     assert "already on the board" in notice.inner_text(), notice.inner_text()
     page.wait_for_timeout(500)
     assert len(arrows_named(skot.elements())) == 2 and bar_of(page).input_value() == "", "a repeated flow adds nothing and clears the bar"
+    # The notice is about the last thing typed: it goes as soon as the user types again.
+    page.keyboard.type("c")
+    page.wait_for_timeout(300)
+    assert notice.count() == 0, "the notice is still up after the user typed again"
+    page.keyboard.press("Backspace")
     evidence.note(arrows=arrows_named(skot.elements()))
     console = [e for e in evidence.errors() if "/api/jev/decide" not in e["text"] and "500" not in e["text"]]
     assert not console, console[:4]
+
+
+@check("ring-around-selection")
+def test_ring_around_selection(page, skot, evidence):
+    """Judge A, second round: with API selected the sixth and seventh nodes went two rows away while the whole
+    left side of API stayed empty, and "svc a" was named "Svc a" next to "Svc B"."""
+    page.route("**/api/jev/decide", lambda r: r.fulfill(status=500, content_type="application/json", body='{"error":"off"}'))
+    skot.new_board()
+    type_enter(page, "api")
+    api = board(skot, 1)[0]
+    letters = "abcdefgh"
+    for i, letter in enumerate(letters, 2):
+        skot.clear()
+        skot.click_element(api["label"])
+        page.keyboard.type("svc " + letter, delay=20)
+        page.keyboard.press("Enter")
+        board(skot, i)
+        page.wait_for_timeout(250)
+    els = by_creation(skot.elements())
+    page.keyboard.press("Escape")
+    page.mouse.move(8, 500)
+    shot(page, evidence, "ring-around-selection", "eight-around-api")
+    assert [e["label"] for e in els[1:]] == ["Svc " + c.upper() for c in letters], [e["label"] for e in els]
+    cx, cy = api["x"] + api["width"] / 2, api["y"] + api["height"] / 2
+    cells = [(round((e["x"] + e["width"] / 2 - cx) / 300), round((e["y"] + e["height"] / 2 - cy) / 128)) for e in els[1:]]
+    evidence.note(cells=cells)
+    assert len(set(cells)) == 8 and all(abs(c) <= 1 and abs(r) <= 1 for c, r in cells), \
+        "eight nodes added with API selected must fill the ring around it: %s" % cells
+    assert not overlapping_pairs(skot.elements())
 

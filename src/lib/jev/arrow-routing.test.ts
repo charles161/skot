@@ -226,6 +226,28 @@ describe("what an arrow covers as drawn", () => {
   });
 });
 
+// Judge A, round 4 (second round): "postgres -> queue" was drawn exactly on top of "queue -> postgres" and read
+// as one double-headed arrow.
+describe("there and back between two nodes", () => {
+  const pair = [box("a", 0, 300), box("b", 400, 300)];
+  const there = link("a", "b");
+  const back = link("b", "a");
+
+  it("the two arrows bow to opposite sides", () => {
+    const map = byId([...pair, there, back]);
+    const up = resolveArrowEndpoints(there, map).control;
+    const down = resolveArrowEndpoints(back, map).control;
+    expect(Math.abs(up.y - 336)).toBeGreaterThanOrEqual(20);
+    expect(Math.abs(down.y - 336)).toBeGreaterThanOrEqual(20);
+    expect(Math.sign(up.y - 336)).toBe(-Math.sign(down.y - 336));
+  });
+
+  it("one arrow alone stays the straight line it was", () => {
+    const map = byId([...pair, there]);
+    expect(resolveArrowEndpoints(there, map)).toEqual(legacy(there, map));
+  });
+});
+
 describe("clicking a bent arrow", () => {
   it("measures the distance to the curve, not to the straight line between its ends", () => {
     const row = [box("a", 0, 300), box("b", 300, 300), box("c", 600, 300)];

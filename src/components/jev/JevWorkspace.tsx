@@ -529,7 +529,8 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       const fit = {
         screenWidth: window.innerWidth,
         screenHeight: window.innerHeight,
-        margins: phone ? { ...margins, left: 16, right: 16, bottom: 150 } : margins,
+        // On a phone the header and the toolbar are two rows: the newest node stays below both.
+        margins: phone ? { ...margins, top: 124, left: 16, right: 16, bottom: 150 } : margins,
       };
       // keepBoard: a growing diagram zooms out to stay whole instead of scrolling its first nodes away. A phone
       // keeps its zoom and pans to the new node.
@@ -749,6 +750,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
 
   const boardNotice = useBoardNotice();
   const showBoardNotice = boardNotice.show;
+  const dismissBoardNotice = boardNotice.dismiss;
   const importPending = useImportFragment(boardNotice.show);
   const boardFile = useBoardFileActions(
     () => ({ elements: elementsRef.current, boardTitle: boardTitleRef.current }),
@@ -1394,8 +1396,13 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     (subjectId: string, els: JevElement[]) => {
       lastTouchedIdRef.current = subjectId;
       const result = buildNextOptions({ elements: els, subjectId, viewportCenter: viewportCenterRef.current });
-      if (result) presentNextOptions(result, els);
-      else setPredictions([]);
+      if (result) {
+        presentNextOptions(result, els);
+      } else {
+        // Nothing more to suggest here: the hint of the suggestions that were on screen goes with them.
+        setPredictions([]);
+        setIntent(null);
+      }
     },
     [presentNextOptions]
   );
@@ -1408,9 +1415,9 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
    * the usual next steps. The order is the board's; jev only marks its pick.
    */
   const presentAfterCreate = useCallback(
-    (nodeId: string, anchorIds: string[], els: JevElement[], userPicked = false, offerEnter = true) => {
+    (nodeId: string, anchorIds: string[], els: JevElement[], userPicked = false, offerEnter = true): boolean => {
       lastTouchedIdRef.current = nodeId;
-      if (aiQuietRef.current) return;
+      if (aiQuietRef.current) return false;
       const result = buildAfterCreateOptions({
         elements: els,
         nodeId,
@@ -1422,10 +1429,12 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       if (!result) {
         setPredictions([]);
         setIntent(null);
-        return;
+        return false;
       }
       // Enter takes the node's first offered connection, once. After that its other connections wait for Tab.
-      presentNextOptions(result, els, { highlight: offerEnter ? enterDefaultIndex(result.options, nodeId) : NO_OPTION });
+      const highlight = offerEnter ? enterDefaultIndex(result.options, nodeId) : NO_OPTION;
+      presentNextOptions(result, els, { highlight });
+      return highlight !== NO_OPTION;
     },
     [presentNextOptions]
   );
@@ -1437,9 +1446,11 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         forkAbortRef.current?.abort();
         setForkSession(null);
       }
+      // A notice about the last thing typed ("That flow is already on the board") is over once they type again.
+      if (val) dismissBoardNotice();
       setThoughtPrompt(val);
     },
-    [forkSession]
+    [forkSession, dismissBoardNotice]
   );
 
   /** A letter typed on the board: append it to the Thought Bar and put the caret there, after the text. */
@@ -1539,8 +1550,12 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       // older node adds nothing.
       const justDrawn = toolCreatedIdRef.current === edited.id;
       toolCreatedIdRef.current = null;
-      if (wired) presentSubjectOptions(edited.id, latest);
-      else presentAfterCreate(edited.id, [], latest, false, justDrawn);
+      if (wired) {
+        presentSubjectOptions(edited.id, latest);
+      } else if (presentAfterCreate(edited.id, [], latest, false, justDrawn)) {
+        // The node's toolbar would sit on the connection now previewed for it; a click on the node brings it back.
+        setInspectorOpen(false);
+      }
     },
     [presentSubjectOptions, presentAfterCreate, pushEditDelta]
   );
@@ -2844,6 +2859,9 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     }
     setSelectedIds(ids);
     setInspectorOpen(ids.length === 1);
+    // A click on the board takes back whatever was on offer to Enter, at once: the same click then Enter does
+    // the same thing whether it comes 50 ms or 5 s later.
+    setActivePredIdx(NO_OPTION);
     selectionTriggerRef.current?.select(ids);
   }, [forkSession]);
 

@@ -161,6 +161,21 @@ features:
       - src/lib/jev/next-options.ts
       - src/components/jev/JevWorkspace.tsx
 
+  - id: hint-never-lies
+    title: "The pill and legend beside the suggestions never promise Enter when nothing is highlighted: after an
+      accepted connection, after a Tab-picked bigger option and after the biggest one"
+    check: hint-never-lies
+    sources:
+      - src/components/jev/JevWorkspace.tsx
+      - src/components/jev/PredictionHud.tsx
+
+  - id: ring-around-selection
+    title: "Eight nodes typed with one node selected fill the ring around it, the left side included, before any
+      goes two rows away; a name's last word is always capitalised (Svc A)"
+    check: ring-around-selection
+    sources:
+      - src/lib/jev/core-loop.ts
+
   - id: call-budget
     title: "Drawing does not drain the AI budget: nothing is asked while a shape, label or arrow is in progress; a
       settled add, arrow, click or drag costs one call; a 6-node, 5-arrow board drawn quickly costs at most 3, and

@@ -139,7 +139,8 @@ export function typedNodeLabel(text: string): string {
       if (ACRONYMS.has(bare)) return word.toUpperCase();
       if (/[A-Z]/.test(word)) return word;
       if (PRODUCT_NAMES[word]) return PRODUCT_NAMES[word];
-      if (i > 0 && (sentence || SMALL_WORDS.has(word))) return word;
+      // Small joining words stay small inside a name ("Queue of Jobs"), never as its last word ("Svc A").
+      if (i > 0 && (sentence || (SMALL_WORDS.has(word) && i < parts.length - 1))) return word;
       return cleanSemanticLabel(word) || word;
     })
     .join(" ");
@@ -285,17 +286,33 @@ function freeSlotBeside(anchor: Anchor, size: { width: number; height: number },
         [flow, [0], true],
         [own, [1, -1], true],
       ];
-  const ring: Array<[x: number, rows: number[], adjacent?: boolean]> = [
-    ...first,
-    [flow, [1, -1]],
-    [flow, [2, -2]],
-    [far, [0, 1, -1]],
-    [back, [0, 1, -1]],
-    [own, [2, -2]],
-    [flow, [3, -3]],
-    [far, [2, -2]],
-    [back, [2, -2]],
-  ];
+  // Around a node the user selected, "next to it" means all the way round, the other side included, before
+  // anything two rows away. Around a node the flow picked, new nodes keep to its flow side first.
+  const ring: Array<[x: number, rows: number[], adjacent?: boolean]> = anchor.picked
+    ? [
+        ...first,
+        [flow, [1, -1]],
+        [back, [0]],
+        [back, [1, -1]],
+        [far, [0]],
+        [flow, [2, -2]],
+        [own, [2, -2]],
+        [far, [1, -1]],
+        [back, [2, -2]],
+        [flow, [3, -3]],
+        [far, [2, -2]],
+      ]
+    : [
+        ...first,
+        [flow, [1, -1]],
+        [flow, [2, -2]],
+        [far, [0, 1, -1]],
+        [back, [0, 1, -1]],
+        [own, [2, -2]],
+        [flow, [3, -3]],
+        [far, [2, -2]],
+        [back, [2, -2]],
+      ];
   const slots: Slot[] = ring.flatMap(([x, rows, adjacent]) => rows.map((r) => ({ at: at(x, r), adjacent: Boolean(adjacent) })));
   const clear = (p: Point) => !obstacles.some((o) => rectsOverlap({ ...p, ...size }, o, CLEARANCE));
   const offArrows = (p: Point) => {

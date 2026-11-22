@@ -255,6 +255,14 @@ function routeByElbow(fromEl: JevElement, toEl: JevElement, swap: boolean, near:
   return null;
 }
 
+/** True when another arrow joins the same two nodes in the opposite direction. */
+function hasWayBack(arrow: JevElement, elementsById: Map<string, JevElement>): boolean {
+  for (const el of elementsById.values()) {
+    if (el.kind === "arrow" && el.fromId === arrow.toId && el.toId === arrow.fromId && el.id !== arrow.id) return true;
+  }
+  return false;
+}
+
 /**
  * Where an arrow is drawn: from the boundary of one shape to the boundary of the other, as one gentle curve,
  * bent around any node that lies between them.
@@ -295,6 +303,9 @@ export function resolveArrowEndpoints(
     const isNearlyAxisAligned =
       Math.abs(dx) < 18 || Math.abs(dy) < 18;
     offset = isNearlyAxisAligned ? 0 : Math.min(28, dist * 0.1);
+    // There and back between the same two nodes: each arrow bows to its own side, so they read as two arrows
+    // instead of one line with a head at each end.
+    if (fromEl && toEl && hasWayBack(arrow, elementsById)) offset = Math.max(offset, Math.min(26, dist * 0.18));
   }
 
   const nx = dist > 0 ? -dy / dist : 0;

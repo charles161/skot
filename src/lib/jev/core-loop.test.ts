@@ -718,6 +718,38 @@ describe("the node the AI names from the board", () => {
   });
 });
 
+// Judge A, round 4 (second round): "svc a" became "Svc a" while "svc b" became "Svc B".
+describe("capitals: a small word is only small inside a name", () => {
+  it("capitalises the last word whatever it is", () => {
+    expect(typedNodeLabel("svc a")).toBe("Svc A");
+    expect(typedNodeLabel("svc b")).toBe("Svc B");
+    expect(typedNodeLabel("plan a")).toBe("Plan A");
+    expect(typedNodeLabel("queue of jobs")).toBe("Queue of Jobs");
+  });
+});
+
+// Judge A, round 4 (second round): with API selected, the sixth and seventh nodes went two rows away while the
+// whole left side of API stayed empty.
+describe("around a selected node the ring is filled all the way round", () => {
+  it("eight nodes typed with one node selected all touch it; the left side is used before two rows away", () => {
+    const api = el({ id: "api", label: "API", x: 600, y: 400 });
+    let board: JevElement[] = [api];
+    const placed: JevElement[] = [];
+    for (const name of ["svc a", "svc b", "svc c", "svc d", "svc e", "svc f", "svc g", "svc h"]) {
+      const plan = planTypedNode({ elements: board, text: name, selectedIds: ["api"], viewportCenter: CENTER })!;
+      placed.push(plan.node);
+      board = [...board, plan.node];
+    }
+    const rowOf = (n: JevElement) => Math.round((n.y + n.height / 2 - (api.y + api.height / 2)) / 128);
+    const colOf = (n: JevElement) => Math.round((n.x + n.width / 2 - (api.x + api.width / 2)) / 300);
+    const cells = placed.map((n) => `${colOf(n)},${rowOf(n)}`);
+    expect(new Set(cells).size).toBe(8);
+    expect(cells.every((c) => c.split(",").every((v) => Math.abs(Number(v)) <= 1))).toBe(true);
+    expect(cells.slice(0, 5)).toEqual(["1,0", "0,1", "0,-1", "1,1", "1,-1"]);
+    expect(cells[5]).toBe("-1,0");
+  });
+});
+
 // Judge B, round 4: "web -> queue" then "queue -> web" cleared the bar and drew nothing.
 describe("a typed flow is drawn as typed, the way back included", () => {
   const web = el({ id: "web", label: "Web", x: 100, y: 300 });
