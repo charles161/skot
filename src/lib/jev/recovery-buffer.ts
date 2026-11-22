@@ -10,7 +10,8 @@ import {
 
 /*
  * Earlier copies of this browser's boards, read with the same tolerant loader as the board itself. A copy that
- * can't be read is carried along untouched: it is never counted, trimmed or deleted.
+ * can't be read is carried along untouched: it is never counted, trimmed or deleted. The fullest copy (the newest
+ * of equally full ones) is never dropped either: not for age, for space or by restoring it.
  *
  * Boards replaced by "Restore earlier copy" have their own short list, so restoring can't push one of the 8 out.
  */
@@ -72,13 +73,15 @@ function fullestOf(entries: BoardRecoveryEntry[]): BoardRecoveryEntry | undefine
   );
 }
 
-/** Drops the oldest readable copies until `max` are left. */
-function trimOldest(copies: StoredCopy[], max: number, keep?: BoardRecoveryEntry): StoredCopy[] {
+/** Drops the oldest readable copies until `max` are left, but never the newest or the fullest. */
+function trimOldest(copies: StoredCopy[], max: number): StoredCopy[] {
   const next = [...copies];
-  let count = readable(next).length;
+  const entries = readable(next);
+  const kept = new Set([entries[0], fullestOf(entries)]);
+  let count = entries.length;
   for (let i = next.length - 1; i >= 0 && count > max; i -= 1) {
     const { entry } = next[i];
-    if (!entry || entry === keep) continue;
+    if (!entry || kept.has(entry)) continue;
     next.splice(i, 1);
     count -= 1;
   }
@@ -97,6 +100,9 @@ function isSaved(storage: StorageLike, roomId: string, board: StoredBoardSnapsho
   );
 }
 
+/** The board a peer's change replaced, when there was no room to save it: "Restore previous board" still needs it. */
+const unsavedReplaced = new WeakMap<StorageLike, { key: string; entry: BoardRecoveryEntry }>();
+
 export function loadRecoverySnapshots(
   storage: StorageLike | null | undefined,
   roomId: string
@@ -111,7 +117,7 @@ export function loadRecoverySnapshots(
 
 /**
  * Prepends a pre-change board snapshot into the room's bounded 8-snapshot ring buffer
- * (newest first; oldest evicted beyond MAX_RECOVERY_SNAPSHOTS).
+ * (newest first; oldest but the fullest evicted beyond MAX_RECOVERY_SNAPSHOTS).
  * The 2-minute save skips a board that is already saved: it would only push an older one out.
  */
 export function pushRecoverySnapshot(
@@ -127,15 +133,20 @@ export function pushRecoverySnapshot(
     }
     const key = getRecoveryStorageKey(roomId);
     let next = trimOldest([{ stored: added, entry: added }, ...readCopies(storage, key)], MAX_RECOVERY_SNAPSHOTS);
-    for (let count = readable(next).length; count > 0; count -= 1) {
-      next = trimOldest(next, count);
+    const replacedByPeer = added.reason !== "periodic";
+    for (;;) {
       try {
         storage.setItem(key, serialize(next));
+        if (replacedByPeer) unsavedReplaced.delete(storage);
         return readable(next);
       } catch {
-        // QuotaExceededError: retry without the oldest
+        // QuotaExceededError: retry without the oldest that may go
+        const fewer = trimOldest(next, readable(next).length - 1);
+        if (fewer.length === next.length) break;
+        next = fewer;
       }
     }
+    if (replacedByPeer) unsavedReplaced.set(storage, { key, entry: added });
   } catch {
     // storage can't be read, so it is not written
   }
@@ -143,7 +154,7 @@ export function pushRecoverySnapshot(
 }
 
 /**
- * Pops and returns the most recently saved recovery snapshot for a room.
+ * Returns the board most recently replaced or saved, and takes its copy off the list unless it is the fullest.
  */
 export function popRecoverySnapshot(
   storage: StorageLike | null | undefined,
@@ -153,12 +164,18 @@ export function popRecoverySnapshot(
   try {
     const key = getRecoveryStorageKey(roomId);
     const copies = readCopies(storage, key);
+    const entries = readable(copies);
+    const unsaved = unsavedReplaced.get(storage);
+    if (unsaved?.key === key) {
+      unsavedReplaced.delete(storage);
+      return { entry: unsaved.entry, remaining: entries };
+    }
     const latest = copies.find((copy) => copy.entry);
     if (!latest) return { entry: null, remaining: [] };
+    if (latest.entry === fullestOf(entries)) return { entry: latest.entry, remaining: entries };
     const rest = copies.filter((copy) => copy !== latest);
     try {
-      if (rest.length === 0) storage.removeItem(key);
-      else storage.setItem(key, serialize(rest));
+      storage.setItem(key, serialize(rest));
     } catch {
       // the copy stays saved
     }
@@ -190,7 +207,7 @@ export function saveBeforeRestore(
     if (!added) return false;
     const key = getBeforeRestoreStorageKey(roomId);
     const next = [{ stored: added, entry: added }, ...readCopies(storage, key)];
-    storage.setItem(key, serialize(trimOldest(next, MAX_BEFORE_RESTORE_COPIES, fullestOf(readable(next)))));
+    storage.setItem(key, serialize(trimOldest(next, MAX_BEFORE_RESTORE_COPIES)));
     return true;
   } catch {
     return false;

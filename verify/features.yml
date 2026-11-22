@@ -487,6 +487,20 @@ features:
     sources:
       - src/lib/jev/recovery-buffer.ts
 
+  - id: restore-keeps-fullest
+    title: "The fullest saved copy is never dropped: after a loss and 3.5 hours of editing it is listed and restorable,
+      beside the 7 newest"
+    check: restore-keeps-fullest
+    sources:
+      - src/lib/jev/recovery-buffer.ts
+
+  - id: restore-fullest-full-storage
+    title: "A full browser storage trims other old copies first: the newest of the fullest, the newest copy and any
+      unreadable one stay, and the fullest can be restored and saved to a file"
+    check: restore-fullest-full-storage
+    sources:
+      - src/lib/jev/recovery-buffer.ts
+
 internal:
   - path: src/app/api/health/route.ts
     reason: Ops health probe; the gate uses it to wait for `next start`, nobody sees it.

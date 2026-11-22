@@ -67,9 +67,9 @@ describe("saved copies load with the tolerant local loader", () => {
   });
 
   it("taking the latest copy back never deletes an unreadable one", () => {
-    const s = memory({ [KEY]: [{ broken: true }, copy(4, 2)] });
+    const s = memory({ [KEY]: [{ broken: true }, copy(4, 2), copy(3, 5)] });
     expect(popRecoverySnapshot(s, ROOM).entry?.id).toBe("rec_4");
-    expect(stored(s)).toEqual([{ broken: true }]);
+    expect(stored(s)).toEqual([{ broken: true }, copy(3, 5)]);
   });
 
   it("a full storage never trims an unreadable copy", () => {
@@ -168,4 +168,109 @@ describe("a restore is one undo step", () => {
     history.undo();
     expect(history.steppedTitle).toBeUndefined();
   });
+});
+
+// Decision 14A (22 Nov 2026): the fullest copy is never dropped. Newest wins a tie.
+describe("the fullest copy is never dropped", () => {
+  const counts = (s: ReturnType<typeof memory>) => loadRecoverySnapshots(s, ROOM).map((c) => c.snapshot.elements.length);
+
+  it.each([10, 20, 180])("a loss followed by %i two-minute saves still lists the full board", (saves) => {
+    const s = memory({ [KEY]: [copy(1, 40)] });
+    for (let at = 2; at < saves + 2; at += 1) pushRecoverySnapshot(s, ROOM, copy(at, (at % 3) + 1));
+    const full = listSavedCopies(s, ROOM).find((c) => c.kind === "copy" && c.fullest);
+    expect(full).toMatchObject({ entry: { id: "rec_1", snapshot: { elements: board(40).elements } } });
+  });
+
+  it("takes one of the 8 places: the 7 others are the newest", () => {
+    const s = memory({ [KEY]: [copy(1, 40)] });
+    for (let at = 2; at < 100; at += 1) pushRecoverySnapshot(s, ROOM, copy(at, 2));
+    expect(loadRecoverySnapshots(s, ROOM).map((c) => c.savedAt)).toEqual([99, 98, 97, 96, 95, 94, 93, 1]);
+  });
+
+  it("of equally full copies the newest is kept, and the older one ages out", () => {
+    const s = memory({ [KEY]: [copy(3, 2), copy(2, 40), copy(1, 40)] });
+    for (let at = 4; at < 30; at += 1) pushRecoverySnapshot(s, ROOM, copy(at, 2));
+    expect(loadRecoverySnapshots(s, ROOM).filter((c) => c.snapshot.elements.length === 40).map((c) => c.id)).toEqual(["rec_2"]);
+  });
+
+  it("a full storage trims the other old ones first", () => {
+    const start = [copy(4, 2), copy(3, 2), copy(2, 2), copy(1, 10)];
+    const s = memory({ [KEY]: start }, JSON.stringify(start).length);
+    pushRecoverySnapshot(s, ROOM, copy(5, 3));
+    expect(counts(s)[0]).toBe(3);
+    expect(counts(s)).toContain(10);
+  });
+
+  it("with no room for both, the fullest stays and nothing is written", () => {
+    const start = [copy(1, 10)];
+    const s = memory({ [KEY]: start }, JSON.stringify(start).length);
+    pushRecoverySnapshot(s, ROOM, copy(2, 2));
+    expect(stored(s)).toEqual(start);
+  });
+
+  it("a fuller board takes its place, even with room for only one", () => {
+    const s = memory({ [KEY]: [copy(1, 10)] }, JSON.stringify([copy(2, 12)]).length);
+    pushRecoverySnapshot(s, ROOM, copy(2, 12));
+    expect(counts(s)).toEqual([12]);
+  });
+
+  it("Restore previous board doesn't use up the fullest", () => {
+    const s = memory({ [KEY]: [copy(2, 10), copy(1, 2)] });
+    expect(popRecoverySnapshot(s, ROOM).entry?.id).toBe("rec_2");
+    expect(counts(s)).toEqual([10, 2]);
+  });
+
+  it("Restore previous board returns the board just replaced, also when that had no room to be saved", () => {
+    const start = [copy(1, 10)];
+    const s = memory({ [KEY]: start }, JSON.stringify(start).length);
+    pushRecoverySnapshot(s, ROOM, { ...copy(2, 4), reason: "authoritative_replace" });
+    expect(popRecoverySnapshot(s, ROOM).entry?.id).toBe("rec_2");
+    expect(stored(s)).toEqual(start);
+  });
+
+  it("holds for copies as the deployed app writes them", () => {
+    const saved = {
+      id: "rec_mib0x2k1_1", savedAt: 1795356540000, reason: "periodic", removedCount: 0, editedCount: 0,
+      previousElementCount: 4,
+      snapshot: {
+        elements: board(4).elements.map((e) => ({ ...e, rev: 3, updatedBy: "peer_1" })), boardTitle: "Checkout",
+        titleRev: 8, titleUpdatedBy: "peer_1", tombstones: { gone: { rev: 2, deletedAt: 5, deletedBy: "peer_1" } },
+        tombstoneHorizonRev: 0, tombstoneHorizonAt: 0, boardEpoch: "ep_1", boardEpochCreatedAt: 5, baseTimestamp: 5,
+        hasLocalEdits: true,
+      },
+    };
+    const s = memory({ [KEY]: [saved] });
+    for (let i = 1; i < 120; i += 1) pushRecoverySnapshot(s, ROOM, copy(saved.savedAt + i, 1));
+    expect(stored(s)).toContainEqual(saved);
+  });
+
+  it("holds over any order of saves and restores, at any storage size, without growing", () => {
+    for (let run = 0; run < 60; run += 1) {
+      let seed = run + 1;
+      const random = (n: number) => Math.floor(((seed = (seed * 16807) % 2147483647) / 2147483647) * n);
+      const bad = [{ broken: run }, { broken: "x" }];
+      const s = memory({ [KEY]: run % 3 ? bad : "[{cut short" }, run % 2 ? 2000 + random(6000) : Infinity);
+      const unreadable = () => listSavedCopies(s, ROOM).filter((c) => c.kind === "unreadable");
+      const unreadableBefore = unreadable();
+      for (let at = 1; at <= 40; at += 1) {
+        const before = loadRecoverySnapshots(s, ROOM);
+        const most = Math.max(-1, ...before.map((c) => c.snapshot.elements.length));
+        const keeper = before.find((c) => c.snapshot.elements.length === most);
+        const count = random(7);
+        const op = random(8);
+        if (op === 0) popRecoverySnapshot(s, ROOM);
+        else if (op === 1) saveBeforeRestore(s, ROOM, board(count, `Now ${at}`), at);
+        else pushRecoverySnapshot(s, ROOM, copy(at, count));
+        const after = loadRecoverySnapshots(s, ROOM);
+
+        const where = `run ${run}, step ${at}`;
+        const pushed = after.find((c) => c.savedAt === at);
+        if (keeper && !(pushed && count >= most)) expect(after.map((c) => c.id), where).toContain(keeper.id);
+        if (pushed) expect(after[0].id, where).toBe(pushed.id);
+        expect(after.length, where).toBeLessThanOrEqual(8);
+        expect(s.data.has(BEFORE) ? stored(s, BEFORE).length : 0, where).toBeLessThanOrEqual(3);
+        expect(unreadable(), where).toEqual(unreadableBefore);
+      }
+    }
+  }, 30_000);
 });

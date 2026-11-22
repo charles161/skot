@@ -60,7 +60,8 @@ describe("JW-10 / JW-13: bounded 8-snapshot local recovery ring buffer with Zod 
         editedCount: 2,
         previousElementCount: 6,
         snapshot: {
-          elements: [makeEl(`el_${i}`, `Snapshot ${i}`)],
+          // 4 is the fullest, so taking 10 back removes it from the list
+          elements: [makeEl(`el_${i}`, `Snapshot ${i}`), ...(i === 4 ? [makeEl("el_extra", "Extra")] : [])],
           boardTitle: `Title ${i}`,
           titleRev: i,
           hasLocalEdits: true,

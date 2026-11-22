@@ -191,3 +191,98 @@ def test_restore_copy_tolerant(page, skot, evidence, shot):
     assert drawn(page) == 501, "the restored 501 did not survive a reload"
     evidence.note(restored=501, unreadable="kept")
     assert_no_console_errors(evidence)
+
+
+def edit_for(page, rounds, name):
+    """One edit, then the app's own 2-minute save, `rounds` times over."""
+    for i in range(rounds):
+        page.get_by_label(TITLE).fill("%s %03d" % (name, i))
+        page.wait_for_timeout(60)
+        page.clock.fast_forward(140_000)
+
+
+def copy_sizes(skot):
+    return [len(c["snapshot"]["elements"]) for c in json.loads(storage(skot, "recovery")) if "reason" in c]
+
+
+@check("restore-keeps-fullest")
+def test_restore_keeps_fullest(page, skot, evidence, shot):
+    page.clock.install()
+    skot.new_board()
+    page.get_by_label(TITLE).fill("Checkout")
+    for name in ("Gateway", "Orders", "Payments", "Ledger"):
+        type_node(skot, name)
+    full = len(skot.elements())
+    page.clock.fast_forward(140_000)
+    page.wait_for_function("k => !!localStorage.getItem(k)", arg="jev_recovery_" + skot.room_id(), timeout=10000)
+
+    # The loss, then editing on what is left.
+    skot.clear()
+    page.keyboard.press("Control+a")
+    page.keyboard.press("Delete")
+    skot.wait_state(lambda els: not els, what="the loss")
+    type_node(skot, "Leftover")
+    edit_for(page, 10, "After")
+    sizes = copy_sizes(skot)
+    assert full in sizes, "23 minutes of editing after the loss rotated the full copy out: %s" % sizes
+    edit_for(page, 80, "Hours")
+    sizes = copy_sizes(skot)
+    assert full in sizes, "3.5 hours of editing after the loss rotated the full copy out: %s" % sizes
+    assert len(sizes) == 8 and sizes.count(1) == 7, "not the full one and 7 recent ones: %s" % sizes
+    assert "Hours 079" in storage(skot, "recovery"), "the newest edit was not saved"
+
+    dialog = open_copies(page)
+    row = dialog.get_by_role("button").filter(has_text="Fullest")
+    assert "%d elements" % full in row.inner_text() and "Checkout" in row.inner_text()
+    shot(page, "8-after-hours")
+    row.click()
+    skot.wait_state(lambda els: len(els) == full, what="the full copy to come back")
+    reopen(page)
+    assert drawn(page) == full, "the full copy did not survive a reload"
+    evidence.note(full=full, edit_minutes=210, kept=sizes)
+    assert_no_console_errors(evidence)
+
+
+@check("restore-fullest-full-storage")
+def test_restore_fullest_full_storage(page, skot, evidence, shot):
+    page.clock.install()
+    skot.new_board()
+    type_node(skot, "Leftover")
+    broken = {"id": "rec_broken", "snapshot": {"elements": [{"id": "cut short"}]}}
+    # Five, so it is storage and not the limit of 8 that drops any. The oldest is the fullest, and has a twin.
+    copies = [saved_copy(at, [element(0)], "Recent %d" % at) for at in (50, 40, 30)]
+    copies += [saved_copy(20, [element(i) for i in range(12)], "Full newer"),
+               saved_copy(10, [element(i) for i in range(12)], "Full older")]
+    put(skot, "recovery", copies + [broken])
+    page.evaluate("""() => {
+        let n = 0;
+        for (let size = 1 << 22; size >= 1; size >>= 1) {
+            for (;;) {
+                try { localStorage.setItem('fill' + n, 'x'.repeat(size)); n += 1; } catch { break; }
+            }
+        }
+    }""")
+    edit_for(page, 12, "Edited while storage is full")
+    kept = json.loads(storage(skot, "recovery"))
+    titles = [c["snapshot"].get("boardTitle") for c in kept]
+    assert "Full newer" in titles, "full storage trimmed the fullest copy: %s" % titles
+    assert "Full older" not in titles, "storage was not full enough to trim: %s" % titles
+    assert titles[0] == "Edited while storage is full 011", "the fullest crowded out the newest: %s" % titles
+    assert broken in kept, "full storage deleted the unreadable copy"
+
+    dialog = open_copies(page)
+    shot(page, "9-full-storage")
+    dialog.get_by_role("button").filter(has_text="Fullest").click()
+    page.wait_for_timeout(1500)
+    assert drawn(page) == 12, "the fullest copy can't be restored with storage full"
+    shot(page, "10-full-storage-restored")
+    # There is no room to save the board itself, and the app says so: the file it points at has to have all of it.
+    page.get_by_test_id("board-notice").filter(has_text="Save board (.json)").wait_for(timeout=5000)
+    page.get_by_role("button", name="Board menu").click()
+    with page.expect_download() as download:
+        page.get_by_role("menuitem", name="Save board (.json)").click()
+    with open(download.value.path(), encoding="utf-8") as f:
+        assert f.read().count('"Node ') == 12, "Save board didn't give the restored copy"
+    assert "Full newer" in storage(skot, "recovery")
+    evidence.note(kept=titles)
+    assert_no_console_errors(evidence)
