@@ -328,6 +328,8 @@ export interface PredictedAction {
   nodeCount?: number;
   /** Who named and shaped this option: the local lexicon, a local template, the Gateway LLM, or the board itself. */
   source?: OptionSource;
+  /** An offered connection only: false when it is a guess, not a usual arrow for the pair. Enter never takes a guess. */
+  usual?: boolean;
 }
 
 export const OPTION_TIERS = ["minimal", "cluster", "full"] as const;

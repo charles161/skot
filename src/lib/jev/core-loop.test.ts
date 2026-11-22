@@ -828,3 +828,119 @@ describe("what Enter takes on the empty bar", () => {
     expect(stepOption(NO_OPTION, 0, false)).toBe(NO_OPTION);
   });
 });
+
+// Charles, 22 Nov (15A): "Rank by what makes sense for the new node. A selection decides only where the node
+// lands; its connection stays available as a later option (one Tab)." Seen on prod at 905f3af: with Postgres
+// selected, "cdn, Enter, Enter" drew "CDN writes to Postgres"; on a phone "object storage" was first offered
+// "Postgres writes to Object Storage".
+describe("the first connection offered is the one that makes sense for the new node", () => {
+  let n = 0;
+  const make = (label: string, kind: ShapeKind = "node"): JevElement => {
+    n += 1;
+    return el({ id: `b${n}`, label, kind, x: 100 + (n % 5) * 300, y: 100 + Math.floor(n / 5) * 160 });
+  };
+  const offer = (boardLabels: string[], added: string, selected?: string) => {
+    const board = boardLabels.map((l) => make(l));
+    const node = make(added);
+    const anchor = selected ? board.find((b) => b.label === selected)! : null;
+    const result = buildAfterCreateOptions({
+      elements: [...board, node],
+      nodeId: node.id,
+      anchorIds: anchor ? [anchor.id] : [],
+      userPicked: Boolean(anchor),
+      viewportCenter: CENTER,
+    })!;
+    const links = result.options.filter((o) => o.category === "connect" && !o.tier);
+    return {
+      titles: links.map((o) => o.title),
+      enter: enterDefaultIndex(result.options, node.id) === 0 ? result.options[0].title : null,
+      hint: `${result.intent.headline} ${result.intent.detail}`,
+    };
+  };
+
+  it("with Postgres selected, a CDN is offered App -> CDN first and CDN -> Postgres one Tab away", () => {
+    const got = offer(["App", "Postgres"], "CDN", "Postgres");
+    expect(got.titles.slice(0, 2)).toEqual(["App → CDN", "CDN → Postgres"]);
+    expect(got.enter).toBe("App → CDN");
+  });
+
+  it("in a full stack, Object Storage is offered Worker -> Object Storage first", () => {
+    const got = offer(["App", "API Gateway", "Auth Service", "Redis", "Postgres", "Kafka", "Worker"], "Object Storage");
+    expect(got.titles[0]).toBe("Worker → Object Storage");
+    expect(got.enter).toBe("Worker → Object Storage");
+    expect(got.titles).not.toContain("Postgres → Object Storage");
+  });
+
+  // [board, new node, the connection Enter takes (null = nothing is highlighted and Enter draws nothing)]
+  const TABLE: Array<[string[], string, string | null]> = [
+    [["App"], "CDN", "App → CDN"],
+    [["App"], "API Gateway", "App → API Gateway"],
+    [["User"], "Load Balancer", "User → Load Balancer"],
+    [["App", "API Gateway"], "Postgres", "API Gateway → Postgres"],
+    [["App", "API Gateway", "Auth Service"], "Postgres", "Auth Service → Postgres"],
+    [["API Gateway"], "Auth Service", "API Gateway → Auth Service"],
+    [["Auth Service"], "Redis", "Auth Service → Redis"],
+    [["Auth Service"], "User DB", "Auth Service → User DB"],
+    [["Postgres"], "Redis", "Redis → Postgres"],
+    [["Postgres"], "Read Replica", "Postgres → Read Replica"],
+    [["Kafka"], "Worker", "Kafka → Worker"],
+    [["Worker"], "Kafka", "Kafka → Worker"],
+    [["Order Service"], "Kafka", "Order Service → Kafka"],
+    [["Worker"], "Postgres", "Worker → Postgres"],
+    [["Worker"], "Object Storage", "Worker → Object Storage"],
+    [["Object Storage"], "Worker", "Worker → Object Storage"],
+    [["Object Storage"], "CDN", "CDN → Object Storage"],
+    [["Payment Service"], "Stripe", "Payment Service → Stripe"],
+    [["Postgres"], "Billing", "Billing → Postgres"],
+    [["API Gateway"], "Billing", "API Gateway → Billing"],
+    [["Postgres"], "Zorblax", "Zorblax → Postgres"],
+    [["API Gateway"], "Zorblax", "API Gateway → Zorblax"],
+    // Nothing sensible: a link may be listed, but none is highlighted and Enter draws nothing.
+    [["Postgres"], "CDN", null],
+    [["CDN"], "Kafka", null],
+    [["Redis"], "Kafka", null],
+    [["Postgres", "Kafka"], "Object Storage", null],
+    [["App"], "Postgres", null],
+    [["Alpha"], "Beta", null],
+    [["Redis"], "Zorblax", "Zorblax → Redis"],
+    [["Kafka"], "CDN", null],
+    [["CDN"], "Auth Service", null],
+    [["Postgres"], "We should think about sharding this later", null],
+  ];
+
+  it.each(TABLE)("%j + %s: Enter takes %s", (boardLabels, added, expected) => {
+    const got = offer(boardLabels, added);
+    expect(got.enter).toBe(expected);
+    if (expected === null) expect(got.hint).not.toMatch(/Enter/);
+  });
+
+  it("a selected node never decides the first offer, only joins the list", () => {
+    for (const [boardLabels, added, expected] of TABLE) {
+      if (!expected || boardLabels.length < 2) continue;
+      for (const selected of boardLabels) {
+        const got = offer(boardLabels, added, selected);
+        expect(got.enter, `${boardLabels} + ${added}, ${selected} selected`).toBe(expected);
+        expect(got.titles.slice(0, 2).some((t) => t.includes(selected)), `${selected} within one Tab`).toBe(true);
+      }
+    }
+  });
+});
+
+// Charles, 22 Nov (16A): "A name gets the same shape inside a -> b as typed alone." Judge A, round 4: plain "api"
+// was a hexagon, "api" inside a flow a box.
+describe("a name looks the same typed alone and typed inside a flow", () => {
+  const NAMES = ["api", "api gateway", "postgres", "redis", "kafka", "user", "cdn", "worker", "s3", "billing", "queue", "web", "load balancer", "db"];
+  const look = (e: JevElement) => ({ label: e.label, kind: e.kind, sublabel: e.sublabel ?? "", width: e.width, height: e.height });
+  const alone = (name: string) => look(planTypedNode({ elements: [], text: name, viewportCenter: CENTER })!.node);
+  const inFlow = (text: string, label: string) => {
+    const added = buildNextOptions({ elements: [], text, viewportCenter: CENTER })!.options[0].addElements;
+    return look(added.find((e) => e.kind !== "arrow" && e.label === label)!);
+  };
+
+  it.each(NAMES)("%s", (name) => {
+    const want = alone(name);
+    expect(inFlow(`${name} -> zorblax`, want.label)).toEqual(want);
+    expect(inFlow(`zorblax -> ${name}`, want.label)).toEqual(want);
+  });
+});
+

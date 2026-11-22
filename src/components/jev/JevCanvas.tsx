@@ -34,6 +34,7 @@ import {
   uid,
   type ArrowGeometry,
 } from "@/lib/jev/geometry";
+import { layoutArrowLabels } from "@/lib/jev/ghost-geometry";
 import {
   computeArrowHeadPath,
   generateArrowPath,
@@ -361,6 +362,13 @@ export function JevCanvas({
     (arrow: JevElement): ArrowGeometry => arrowGeometries.get(arrow.id) ?? resolveArrowEndpoints(arrow, elementsById),
     [arrowGeometries, elementsById]
   );
+  /** Where each label sits: the middle of its arrow, or slid along it clear of nodes and other labels. */
+  const labelSpots = useMemo(() => layoutArrowLabels(elements, elementsById), [elements, elementsById]);
+  /** The same with the previewed arrows added last, so a ghost label never sits on a drawn one. */
+  const ghostLabelSpots = useMemo(() => {
+    const ghosts = (activePrediction?.addElements ?? []).filter((e) => e.kind === "arrow");
+    return ghosts.length > 0 ? layoutArrowLabels([...elements, ...ghosts], ghostElementsMap) : null;
+  }, [elements, activePrediction, ghostElementsMap]);
 
   const removedGhostSet = useMemo(
     () => new Set(activePrediction?.removeIds ?? []),
@@ -1294,8 +1302,9 @@ export function JevCanvas({
               arrow.dashed
             );
 
-            const labelX = 0.25 * start.x + 0.5 * control.x + 0.25 * end.x;
-            const labelY = 0.25 * start.y + 0.5 * control.y + 0.25 * end.y;
+            const spot = labelSpots.get(arrow.id);
+            const labelX = spot?.x ?? 0.25 * start.x + 0.5 * control.x + 0.25 * end.x;
+            const labelY = spot?.y ?? 0.25 * start.y + 0.5 * control.y + 0.25 * end.y;
 
             return (
               <g
@@ -1709,8 +1718,9 @@ export function JevCanvas({
             const lineEnd = isLegacyHead ? end : markers.lineEnd;
             const d = `M ${lineStart.x} ${lineStart.y} Q ${control.x} ${control.y} ${lineEnd.x} ${lineEnd.y}`;
             const head = isLegacyHead ? computeArrowHeadPath(control, end, 8) : null;
-            const labelX = 0.25 * start.x + 0.5 * control.x + 0.25 * end.x;
-            const labelY = 0.25 * start.y + 0.5 * control.y + 0.25 * end.y;
+            const spot = ghostLabelSpots?.get(arrow.id);
+            const labelX = spot?.x ?? 0.25 * start.x + 0.5 * control.x + 0.25 * end.x;
+            const labelY = spot?.y ?? 0.25 * start.y + 0.5 * control.y + 0.25 * end.y;
             return (
               <g
                 key={`ghost_${arrow.id}`}
@@ -2010,13 +2020,14 @@ export function JevCanvas({
         const arrowMid = isArrow
           ? resolveArrowEndpoints(editingElement, elementsById)
           : null;
+        const editSpot = isArrow ? labelSpots.get(editingElement.id) : undefined;
         const left = isArrow && arrowMid
-          ? viewport.x + (0.25 * arrowMid.start.x + 0.5 * arrowMid.control.x + 0.25 * arrowMid.end.x) * viewport.zoom - 64
+          ? viewport.x + (editSpot?.x ?? 0.25 * arrowMid.start.x + 0.5 * arrowMid.control.x + 0.25 * arrowMid.end.x) * viewport.zoom - 64
           : isFrame
             ? viewport.x + (editingElement.x + 12) * viewport.zoom
             : viewport.x + (editingElement.x + 10) * viewport.zoom;
         const top = isArrow && arrowMid
-          ? viewport.y + (0.25 * arrowMid.start.y + 0.5 * arrowMid.control.y + 0.25 * arrowMid.end.y) * viewport.zoom - 14
+          ? viewport.y + (editSpot?.y ?? 0.25 * arrowMid.start.y + 0.5 * arrowMid.control.y + 0.25 * arrowMid.end.y) * viewport.zoom - 14
           : isFrame
             ? viewport.y + (editingElement.y + 6) * viewport.zoom
             : viewport.y +

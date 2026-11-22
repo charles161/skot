@@ -176,6 +176,37 @@ features:
     sources:
       - src/lib/jev/core-loop.ts
 
+  - id: first-connection-makes-sense
+    title: "15A: the first connection offered, and the only one Enter takes, is the usual one for the new node
+      (App -> CDN, Worker -> Object Storage); a selected node decides where the node lands and its connection is
+      one Tab away; with nothing sensible on the board nothing is highlighted"
+    check: first-connection-makes-sense
+    sources:
+      - src/lib/jev/core-loop.ts
+      - src/lib/jev/next-options.ts
+
+  - id: same-shape-in-flow
+    title: "16A: a name gets the same shape, size and caption inside a typed flow (api -> worker) as typed alone"
+    check: same-shape-in-flow
+    sources:
+      - src/lib/jev/core-loop.ts
+      - src/lib/jev/next-options.ts
+
+  - id: fork-cancel-restores-view
+    title: "19A: cancelling Fork It (Esc, at the pressure step or on the takes) returns the view from before Fork;
+      accepting a take does not"
+    check: fork-cancel-restores-view
+    sources:
+      - src/components/jev/JevWorkspace.tsx
+
+  - id: labels-stay-clear
+    title: "18A: arrow labels slide along their arrows until clear of nodes and of each other, on a busy 14-node
+      board and on a phone's single column, where the newest label also stays inside the screen; no node moves"
+    check: labels-stay-clear
+    sources:
+      - src/lib/jev/ghost-geometry.ts
+      - src/components/jev/JevCanvas.tsx
+
   - id: call-budget
     title: "Drawing does not drain the AI budget: nothing is asked while a shape, label or arrow is in progress; a
       settled add, arrow, click or drag costs one call; a 6-node, 5-arrow board drawn quickly costs at most 3, and

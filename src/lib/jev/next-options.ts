@@ -34,6 +34,7 @@ import {
   sizeFor,
   slotBeside,
   typedNodeLabel,
+  typedNodeLook,
   typedNodeOption,
   type TypedNodePlan,
 } from "./core-loop";
@@ -612,12 +613,8 @@ function describedDrafts(text: string, anchor: JevElement | null): Draft[] | nul
 
 function flowDrafts(text: string, elements: JevElement[], anchor: JevElement | null): Draft[] {
   const local = buildLocalSemanticGraphFromPrompt(text).graph;
-  const nodes: DraftNode[] = local.nodes.map((n) => ({
-    key: n.id,
-    label: typedNodeLabel(n.label),
-    sublabel: n.sublabel,
-    kind: (n.kind === "text" ? "node" : n.kind) as ShapeKind,
-  }));
+  // Each name in a flow is drawn exactly as it would be typed alone: same label, shape and caption.
+  const nodes: DraftNode[] = local.nodes.map((n) => ({ key: n.id, ...typedNodeLook(n.label) }));
   const edges: DraftEdge[] = local.edges.map((e) => ({ from: e.from, to: e.to, label: e.label, dashed: e.dashed }));
   const tail = nodes[nodes.length - 1];
   const tailComp = componentForLabel(tail.label);
@@ -1412,12 +1409,14 @@ export function buildAfterCreateOptions(input: {
   // The links are already offered above: a next step that is only another link would say the same thing twice.
   const steps = (next?.options ?? []).filter((o) => o.addElements.some((e) => e.kind !== "arrow"));
   const node = input.elements.find((e) => e.id === input.nodeId)!;
+  // Enter takes the first connection only when it is the usual one for the pair, never a guess.
+  const offersEnter = input.offerEnter !== false && links[0].usual !== false;
   return {
     intent: {
       kind: "domain_continue",
       headline: input.offerEnter === false ? `More connections for ${node.label || node.kind}` : `Connect ${node.label || node.kind}?`,
-      detail: input.offerEnter === false ? "Tab picks one, typing skips" : "Enter accepts, typing skips",
-      offersEnter: input.offerEnter !== false,
+      detail: offersEnter ? "Enter accepts, typing skips" : "Tab picks one, typing skips",
+      offersEnter,
       subjectId: node.id,
       relatedIds: [],
       timestamp: Date.now(),

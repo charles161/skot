@@ -3,6 +3,7 @@
  * quadratic bend, the label at the curve's midpoint), so layout and tests judge what the user sees.
  */
 import { resolveArrowEndpoints, type Rect } from "./geometry";
+import { isContainerKind, isShapeKind } from "./notation-kinds";
 import type { JevElement, Point } from "./types";
 
 const SAMPLES = 24;
@@ -37,14 +38,67 @@ export function labelRect(arrow: JevElement, byId: Map<string, JevElement>): Rec
   return { x: x - w / 2, y: y - LABEL_H / 2, width: w, height: LABEL_H };
 }
 
-/** Everything an arrow covers as drawn: its curve and its label. */
-export function arrowBounds(arrow: JevElement, byId: Map<string, JevElement>): Rect {
+/** The pill an arrow's label is drawn in, centred on `at`. */
+export function drawnLabelRect(text: string, at: Point): Rect {
+  const width = text.length * 7.2 + 18;
+  return { x: at.x - width / 2, y: at.y - 11, width, height: 20 };
+}
+
+/** Where along its arrow a label is tried: the middle first, then a little to each side, further each time. */
+const LABEL_SLIDE = [0.5, 0.42, 0.58, 0.34, 0.66, 0.27, 0.73, 0.2, 0.8];
+const LABEL_GAP = 3;
+
+const isSketch = (el: JevElement) => !el.morphMeta || el.morphMeta.notation === "sketch";
+
+/**
+ * Where every arrow's label sits (Charles, 22 Nov 2026: "slide labels along their arrows until clear of other
+ * labels and nodes; nodes never move"). A label stays at the middle of its arrow unless that spot is on a node
+ * or on a label placed before it; then it slides along the arrow to the nearest spot that is clear. Arrows are
+ * taken oldest first, so adding an arrow never moves the label of an earlier one. With no clear spot the label
+ * stays at the middle. Sequence, ER and state diagrams keep their own label places.
+ */
+export function layoutArrowLabels(elements: Iterable<JevElement>, byId: Map<string, JevElement>): Map<string, Point> {
+  const all = [...elements];
+  const nodes: Rect[] = all.filter((e) => isShapeKind(e.kind) && !isContainerKind(e.kind) && isSketch(e));
+  const arrows = all
+    .filter((e) => e.kind === "arrow" && e.label?.trim())
+    .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const placed: Rect[] = [];
+  const spots = new Map<string, Point>();
+  const at = (g: { start: Point; control: Point; end: Point }, t: number): Point => ({
+    x: (1 - t) * (1 - t) * g.start.x + 2 * (1 - t) * t * g.control.x + t * t * g.end.x,
+    y: (1 - t) * (1 - t) * g.start.y + 2 * (1 - t) * t * g.control.y + t * t * g.end.y,
+  });
+  for (const arrow of arrows) {
+    const geom = resolveArrowEndpoints(arrow, byId);
+    const text = arrow.label.trim();
+    const middle = at(geom, 0.5);
+    let spot = middle;
+    const from = arrow.fromId ? byId.get(arrow.fromId) : undefined;
+    const to = arrow.toId ? byId.get(arrow.toId) : undefined;
+    if (from && to && isSketch(arrow) && isSketch(from) && isSketch(to)) {
+      for (const t of LABEL_SLIDE) {
+        const candidate = at(geom, t);
+        const rect = drawnLabelRect(text, candidate);
+        if (nodes.some((n) => rectsIntersect(rect, n, LABEL_GAP)) || placed.some((r) => rectsIntersect(rect, r, LABEL_GAP))) continue;
+        spot = candidate;
+        break;
+      }
+    }
+    placed.push(drawnLabelRect(text, spot));
+    spots.set(arrow.id, spot);
+  }
+  return spots;
+}
+
+/** Everything an arrow covers as drawn: its curve and its label (at `labelAt` when the label has slid). */
+export function arrowBounds(arrow: JevElement, byId: Map<string, JevElement>, labelAt?: Point): Rect {
   const pts = curvePoints(arrow, byId);
   let minX = Math.min(...pts.map((p) => p.x));
   let maxX = Math.max(...pts.map((p) => p.x));
   let minY = Math.min(...pts.map((p) => p.y));
   let maxY = Math.max(...pts.map((p) => p.y));
-  const label = labelRect(arrow, byId);
+  const label = labelAt && arrow.label?.trim() ? drawnLabelRect(arrow.label.trim(), labelAt) : labelRect(arrow, byId);
   if (label) {
     minX = Math.min(minX, label.x);
     maxX = Math.max(maxX, label.x + label.width);

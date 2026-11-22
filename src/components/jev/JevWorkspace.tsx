@@ -100,7 +100,7 @@ import {
   serializeCanvasStateForJev,
   type ContextSuggestion,
 } from "@/lib/jev/prediction-engine";
-import { arrowBounds } from "@/lib/jev/ghost-geometry";
+import { arrowBounds, layoutArrowLabels } from "@/lib/jev/ghost-geometry";
 import { SelectionSuggestTrigger } from "@/lib/jev/selection-trigger";
 import { SettledAsk } from "@/lib/jev/settled-ask";
 import {
@@ -408,6 +408,12 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   const [theme, setTheme] = useBoardTheme();
   const [renderStyle, setRenderStyle] = useState<RenderStyle>("sketch");
   const [viewport, setViewport] = useState<Viewport>({ x: 80, y: 40, zoom: 1 });
+  const viewportRef = useRef(viewport);
+  useEffect(() => {
+    viewportRef.current = viewport;
+  }, [viewport]);
+  /** Where the view was when Fork It opened: cancelling Fork goes back there. */
+  const viewBeforeForkRef = useRef<Viewport | null>(null);
   const [screenSize, setScreenSize] = useState({ width: 1280, height: 800 });
 
   // Notation Morph state
@@ -547,7 +553,11 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       // An arrow between two nodes counts as what is drawn: its curve (it may bend round a node) and its label.
       const byId = new Map([...elementsRef.current, ...targetEls].map((e) => [e.id, e]));
       const links = targetEls.filter((e) => e.kind === "arrow" && byId.has(e.fromId ?? "") && byId.has(e.toId ?? ""));
-      const bounds = unionRects([computeBounds(targetEls.filter((e) => !links.includes(e))), ...links.map((a) => arrowBounds(a, byId))]);
+      const spots = links.length > 0 ? layoutArrowLabels(byId.values(), byId) : null;
+      const bounds = unionRects([
+        computeBounds(targetEls.filter((e) => !links.includes(e))),
+        ...links.map((a) => arrowBounds(a, byId, spots?.get(a.id))),
+      ]);
       if (!bounds || typeof window === "undefined") return;
       // A phone has no room for desktop gutters, and its dock (one chip row and the bar) is short.
       const phone = opts.keepBoard && window.innerWidth < 640;
@@ -1467,7 +1477,10 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   const changeThought = useCallback(
     (val: string) => {
       if (forkSession && val.trim()) {
+        // Typing a name is a cancel too: back to the view from before Fork.
         forkAbortRef.current?.abort();
+        if (viewBeforeForkRef.current) setViewport(viewBeforeForkRef.current);
+        viewBeforeForkRef.current = null;
         setForkSession(null);
       }
       // A notice about the last thing typed ("That flow is already on the board") is over once they type again.
@@ -1761,6 +1774,8 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         evaluating: false,
       });
       announceStatus("Fork It: pick a pressure, or skip for the classic takes");
+      // Re-opening Fork from inside Fork keeps the first view: that is the one the user had.
+      viewBeforeForkRef.current ??= viewportRef.current;
       fitToView([...subgraph.selectedShapes, ...subgraph.selectedFrames], {
         top: 100,
         right: 64,
@@ -1938,6 +1953,8 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       if (!take) return;
 
       forkAbortRef.current?.abort();
+      // Accepted, not cancelled: the view goes to what was swapped in.
+      viewBeforeForkRef.current = null;
       recordSuggestionAccepted(getBrowserStorage(), take.feedbackKeys);
 
       const nextElements = updateElements((prev) =>
@@ -1978,8 +1995,16 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     [forkSession, updateElements, pushEditDelta, refreshPredictions, fitToView, announceStatus]
   );
 
+  // However Fork ends (cancel, accept, undo, a new board), the remembered view ends with it.
+  useEffect(() => {
+    if (!forkSession) viewBeforeForkRef.current = null;
+  }, [forkSession]);
+
   const cancelForkSession = useCallback(() => {
     forkAbortRef.current?.abort();
+    // Fork moved and zoomed the view onto the selection; a cancel leaves the board as it was, the view included.
+    if (viewBeforeForkRef.current) setViewport(viewBeforeForkRef.current);
+    viewBeforeForkRef.current = null;
     if (forkSession) {
       const active =
         forkSession.takes[forkSession.activeIndex] ?? forkSession.takes[0];
@@ -2908,7 +2933,9 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   const handleCanvasSelectIds = useCallback((ids: string[]) => {
     thoughtInputRef.current?.blur();
     if (forkSession) {
+      // A click on the board ends Fork where the pointer is: the view stays, so nothing jumps under it.
       forkAbortRef.current?.abort();
+      viewBeforeForkRef.current = null;
       setForkSession(null);
     }
     setSelectedIds(ids);

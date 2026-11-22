@@ -9,6 +9,7 @@ import {
   type ShapePath,
 } from "./rough-paths";
 import { BOARD_PAPER, layoutShapeGlyphs, shapeLabelBox, type ShapeGlyphs } from "./shape-layout";
+import { layoutArrowLabels } from "./ghost-geometry";
 import { BoardTheme, ELEMENT_KINDS, ElementKind, JevElement, Point, RenderStyle } from "./types";
 
 export type SvgAttrValue = string | number | boolean | undefined | null;
@@ -422,6 +423,7 @@ export function computeExportBounds(
   if (sanitized.length === 0) return null;
 
   const elementsById = new Map(sanitized.map((el) => [el.id, el]));
+  const labelSpots = layoutArrowLabels(sanitized, elementsById);
   const sketchMargin = options?.renderStyle === "sketch" ? 4 : 0;
 
   const acc = {
@@ -437,8 +439,9 @@ export function computeExportBounds(
       expandQuadraticBezierBounds(acc, start, control, end, 9);
       const labelMetrics = getArrowLabelMetrics(el.label);
       if (labelMetrics) {
-        const lx = 0.25 * start.x + 0.5 * control.x + 0.25 * end.x;
-        const ly = 0.25 * start.y + 0.5 * control.y + 0.25 * end.y;
+        const spot = labelSpots.get(el.id);
+        const lx = spot?.x ?? 0.25 * start.x + 0.5 * control.x + 0.25 * end.x;
+        const ly = spot?.y ?? 0.25 * start.y + 0.5 * control.y + 0.25 * end.y;
         expandBounds(
           acc,
           lx - labelMetrics.width / 2,
@@ -686,7 +689,8 @@ function buildArrowNode(
   arrow: JevElement,
   elementsById: Map<string, JevElement>,
   theme: BoardTheme,
-  boardStyle: RenderStyle
+  boardStyle: RenderStyle,
+  labelSpot?: Point
 ): SvgNode {
   const renderStyle = resolveRenderStyle(arrow, boardStyle);
   const pal = getTonePalette(arrow.tone, theme);
@@ -727,8 +731,8 @@ function buildArrowNode(
 
   const labelMetrics = getArrowLabelMetrics(arrow.label);
   if (labelMetrics) {
-    const labelX = 0.25 * start.x + 0.5 * control.x + 0.25 * end.x;
-    const labelY = 0.25 * start.y + 0.5 * control.y + 0.25 * end.y;
+    const labelX = labelSpot?.x ?? 0.25 * start.x + 0.5 * control.x + 0.25 * end.x;
+    const labelY = labelSpot?.y ?? 0.25 * start.y + 0.5 * control.y + 0.25 * end.y;
     const pillFill = theme === "midnight" ? "#151A24" : "#FAF8F2";
     const subtextColor = splitSvgColor(pal.subtext, "#5C6370");
 
@@ -897,6 +901,8 @@ export function buildBoardSvgTree(
   }
 
   const elementsById = new Map(sanitized.map((el) => [el.id, el]));
+  // The export draws each label where the canvas does: slid along its arrow when the middle is taken.
+  const labelSpots = layoutArrowLabels(sanitized, elementsById);
   const bounds = computeExportBounds(sanitized, { renderStyle });
 
   const vbX = bounds ? bounds.x - padding : 0;
@@ -943,7 +949,7 @@ export function buildBoardSvgTree(
     children.push(buildContainerNode(container, theme, renderStyle));
   }
   for (const arrow of arrows) {
-    children.push(buildArrowNode(arrow, elementsById, theme, renderStyle));
+    children.push(buildArrowNode(arrow, elementsById, theme, renderStyle, labelSpots.get(arrow.id)));
   }
   for (const draw of freedraws) {
     const node = buildFreedrawNode(draw, theme);

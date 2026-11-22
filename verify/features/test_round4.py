@@ -211,12 +211,13 @@ def test_enter_needs_pick(page, skot, evidence, ai):
     evidence.note(nodes=labels(skot), arrows=arrows_named(els))
 
     # 7. Judge B, second round: "app, Enter, postgres, Enter", click App, Enter within 300 ms accepted the
-    # connection still on offer for Postgres; after 600 ms the same keys did not. A click takes the offer back at once.
+    # connection still on offer for the last node; after 600 ms the same keys did not. A click takes the offer
+    # back at once. (Since 15A an app and a database have no usual connection, so the pair is app and gateway.)
     skot.new_board()
     type_enter(page, "app")
-    type_enter(page, "postgres")
+    type_enter(page, "api gateway")
     board(skot, 2)
-    assert highlighted(page), "the connection of Postgres is on offer"
+    assert highlighted(page), "the connection of API Gateway is on offer"
     app = skot.by_label("App")
     page.mouse.click(*skot.to_screen(app["x"] + app["width"] / 2, app["y"] + app["height"] * 0.55))
     page.keyboard.press("Enter")

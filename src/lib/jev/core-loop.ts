@@ -213,6 +213,70 @@ function bestFlow(other: LabeledNode, node: LabeledNode): Flow & { otherFeeds: b
   return out.strength > into.strength ? { ...out, otherFeeds: false } : { ...into, otherFeeds: true };
 }
 
+// ------------------------------------------------------------------ which arrow makes sense
+
+/**
+ * How usual an arrow from a node of one role to a node of another is, as the primary flow of data or calls:
+ * 7 the usual next step, 5 to 6 common, 3 to 4 seen but odd, absent = no reason to draw it. Placement above asks
+ * the looser question "do these two belong near each other"; this one decides which arrow is offered, and
+ * whether Enter may take it.
+ */
+const ARROW_SENSE: Record<Role, Partial<Record<Role, number>>> = {
+  client: { edge: 7, service: 5 },
+  edge: { service: 7, edge: 5, storage: 3, cache: 3, store: 3, queue: 3 },
+  service: { store: 7, cache: 7, queue: 7, external: 7, storage: 6, service: 5, worker: 3 },
+  worker: { store: 7, storage: 7, external: 6, queue: 5, cache: 4 },
+  queue: { worker: 7, service: 5, store: 4, storage: 3 },
+  cache: { store: 6 },
+  store: { store: 5, storage: 4, cache: 3 },
+  storage: { worker: 3 },
+  external: { queue: 4, service: 4 },
+};
+/** From this strength up an arrow is the usual thing to draw: it may be highlighted, and Enter may take it. */
+const SENSIBLE = 5;
+/** A node whose name says nothing is most often a service; an arrow guessed on that is never better than common. */
+const UNNAMED_ROLE: Role = "service";
+const UNNAMED_CAP = 5;
+
+/** True for an edge the catalog shows routing requests into services (a gateway, a load balancer; not a CDN). */
+const frontsServices = (node: LabeledNode): boolean =>
+  flowRole(node) === "edge" && Boolean(componentForLabel(node.label)?.links.some((l) => BY_KEY.get(l.key)?.role === "service"));
+
+interface Board {
+  /** No service is on the board: a gateway stands in for the one that would do the writing. */
+  noService: boolean;
+}
+
+/**
+ * How much sense an arrow from `from` to `to` makes: the catalog draws exactly this link (9), two nodes of one
+ * kind (7), otherwise the usual flow between their roles. A node whose name says nothing counts as a service,
+ * capped at "common", when the other node is a known one; two such nodes, or a sentence, give no reason at all.
+ */
+function arrowSense(from: LabeledNode, to: LabeledNode, board: Board): Flow {
+  const ra = flowRole(from);
+  const rb = flowRole(to);
+  const a = ra ? componentForLabel(from.label) : null;
+  const b = rb ? componentForLabel(to.label) : null;
+  const direct = a && b ? a.links.find((l) => l.key === b.key && !l.viaUpstream) : undefined;
+  if (direct) return { strength: 9, label: direct.edge };
+  if (a && b && a.key === b.key && norm(from.label) !== norm(to.label)) return { strength: 7 };
+  if ((!ra && !rb) || isSentence(from) || isSentence(to)) return { strength: 0 };
+  const known = ARROW_SENSE[ra ?? UNNAMED_ROLE][rb ?? UNNAMED_ROLE] ?? 0;
+  if (!ra || !rb) return { strength: Math.min(known, UNNAMED_CAP) >= SENSIBLE ? UNNAMED_CAP : 0 };
+  // Requests reach a service through an edge that routes to services; a CDN in front of one is seen, not usual.
+  if (ra === "edge" && rb === "service" && !frontsServices(from)) return { strength: 4 };
+  // With no service on the board, the gateway in front is what talks to the database, the cache or the queue.
+  const standIn = board.noService && frontsServices(from) ? (ARROW_SENSE.service[rb] ?? 0) - 2 : 0;
+  return { strength: Math.max(known, standIn) };
+}
+
+/** The better direction for an arrow between a board node and the new node. */
+function bestArrow(other: LabeledNode, node: LabeledNode, board: Board): Flow & { otherFeeds: boolean } {
+  const into = arrowSense(other, node, board);
+  const out = arrowSense(node, other, board);
+  return out.strength > into.strength ? { ...out, otherFeeds: false } : { ...into, otherFeeds: true };
+}
+
 // ------------------------------------------------------------------ placement
 
 const H_GAP = 128;
@@ -435,20 +499,28 @@ function runsOffNarrowView(anchor: Anchor, size: { width: number; height: number
   return anchor.side === "right" ? a.x + a.width + column > viewport.x + viewport.width : a.x - column < viewport.x;
 }
 
+/**
+ * How a typed name is drawn: its tidied label, its shape and the catalog's caption when the name is exactly a
+ * catalog one. The one rule for a name typed alone and for each name inside a typed flow.
+ */
+export function typedNodeLook(text: string): { label: string; kind: ShapeKind; sublabel?: string } {
+  const label = typedNodeLabel(text);
+  const named = CATALOG.find((c) => norm(c.label) === norm(label));
+  return { label, kind: typedNodeKind(label), ...(named?.sublabel ? { sublabel: named.sublabel } : {}) };
+}
+
 /** What Enter creates for the typed text: one node, named as typed, in the best free space. Null only for empty text. */
 export function planTypedNode(input: TypedNodeInput): TypedNodePlan | null {
-  const label = typedNodeLabel(input.text);
+  const { label, kind, sublabel } = typedNodeLook(input.text);
   if (!label) return null;
-  const kind = typedNodeKind(label);
   const size = sizeFor(kind);
-  const named = CATALOG.find((c) => norm(c.label) === norm(label));
   const picked = pickAnchor(input, label, kind);
   const anchor = picked && runsOffNarrowView(picked, size, input.viewport) ? { ...picked, stack: true } : picked;
   const slot = anchor
     ? freeSlotBeside(anchor, size, input.elements)
     : { at: freeSpotAround(input.viewportCenter, size, input.elements), adjacent: false };
   return {
-    node: makeShape(kind, label, named?.sublabel, slot.at),
+    node: makeShape(kind, label, sublabel, slot.at),
     anchorId: anchor?.id ?? null,
     anchorIds: anchor ? anchor.group ?? [anchor.id] : [],
     adjacent: slot.adjacent,
@@ -493,11 +565,12 @@ export interface ConnectionInput {
 }
 
 /**
- * Links between the new node and the board, best first: a node the user had selected, then the most usual
- * link (the catalog's own pairs, then the usual flow by role, then looser but sound pairings). A node whose
- * name says nothing is offered only the node it was placed beside (or, with none, its closest neighbour).
- * The order depends only on the board, so the highlighted link is the same every time; jev's score is shown
- * on top of it, never instead.
+ * Links between the new node and the board, the one that makes most sense first (Charles, 22 Nov 2026: "rank
+ * by what makes sense for the new node; a selection decides only where the node lands"): the catalog's own
+ * pairs, then the usual flow between the two roles. A node the user had selected is always in the list, one Tab
+ * away, whatever the two are. When nothing on the board makes sense for the new node, the closest candidate is
+ * still listed, marked `usual: false`: nothing is highlighted and Enter draws nothing.
+ * The order depends only on the board, so it is the same every time; jev's score is shown on top of it.
  */
 export function connectionOptions(input: ConnectionInput): PredictedAction[] {
   const node = input.elements.find((e) => e.id === input.nodeId);
@@ -514,8 +587,9 @@ export function connectionOptions(input: ConnectionInput): PredictedAction[] {
   const here = getElementCenter(node);
   const byId = new Map(input.elements.map((e) => [e.id, e]));
   const solid = input.elements.filter((e) => isObstacle(e) && e.kind !== "freedraw");
+  const board: Board = { noService: !input.elements.some((e) => isComponentShape(e) && flowRole(e) === "service") };
   const scored = others.map((other, index) => {
-    const usual = bestFlow(other, node);
+    const usual = bestArrow(other, node, board);
     const isAnchor = input.anchorIds?.includes(other.id) ?? false;
     const [from, to] = usual.strength > 0 ? (usual.otherFeeds ? [other, node] : [node, other]) : orientPair(other, node);
     return {
@@ -531,23 +605,33 @@ export function connectionOptions(input: ConnectionInput): PredictedAction[] {
       distance: Math.hypot(getElementCenter(other).x - here.x, getElementCenter(other).y - here.y),
     };
   });
-  const anyUsual = scored.some((s) => s.strength > 0);
+  const top = scored.reduce<number>((best, s) => Math.max(best, s.strength), 0);
+  const anySensible = top >= SENSIBLE;
   const closest = scored.reduce<number>((best, s) => Math.min(best, s.distance), Infinity);
   const anyAnchor = scored.some((s) => s.isAnchor);
-  // A weaker pairing is only worth showing when nothing clearly better is on the board.
-  const top = scored.reduce<number>((best, s) => Math.max(best, s.strength), 0);
+  const picked = (s: (typeof scored)[number]) => Boolean(input.userPicked && s.isAnchor);
+  // A name that says nothing gets one offer, with the node it was placed beside: three guesses would be noise.
+  const named = flowRole(node) !== null;
   const offered = scored.filter(
     (s) =>
-      (s.strength > 0 && s.strength >= top - 2) ||
-      (s.isAnchor && (input.userPicked || !anyUsual)) ||
-      (!anyUsual && !anyAnchor && linked.size === 0 && s.distance === closest)
+      // What makes sense, and nothing clearly weaker than the best of it.
+      (named && s.strength >= SENSIBLE && s.strength >= top - 2) ||
+      // The node the user selected: always there, one Tab away.
+      picked(s) ||
+      // Nothing makes sense: the odd-but-seen pairing, the node it was placed beside, or its closest neighbour.
+      ((!anySensible || !named) &&
+        ((named && s.strength > 0 && s.strength === top) ||
+          s.isAnchor ||
+          ((top === 0 || !named) && !anyAnchor && linked.size === 0 && s.distance === closest)))
   );
   // What feeds the new node comes before what it feeds, at equal strength: the arrow into it is the one missing.
-  const rank = (s: (typeof scored)[number]) =>
-    (input.userPicked && s.isAnchor ? 1000 : 0) + s.strength * 10 + (s.feeds ? 2 : 0) + (s.isAnchor ? 1 : 0);
+  const rank = (s: (typeof scored)[number]) => s.strength * 10 + (s.feeds ? 2 : 0) + (s.isAnchor ? 1 : 0);
+  const ordered = offered.sort((a, b) => rank(b) - rank(a) || a.distance - b.distance || a.index - b.index);
+  // The selected node's link sits right after the first, so it is always one Tab away.
+  const own = ordered.findIndex(picked);
+  if (own > 1) ordered.splice(1, 0, ...ordered.splice(own, 1));
   const seen = new Set<string>();
-  return offered
-    .sort((a, b) => rank(b) - rank(a) || a.distance - b.distance || a.index - b.index)
+  return ordered
     .filter((s) => {
       // Two links that would read the same (the board has two nodes of that name): the nearer one is enough.
       const title = `${norm(s.from.label)}>${norm(s.to.label)}`;
@@ -556,7 +640,7 @@ export function connectionOptions(input: ConnectionInput): PredictedAction[] {
       return true;
     })
     .slice(0, input.max ?? 3)
-    .map(({ from, to, label }) => {
+    .map(({ from, to, label, strength }) => {
       // An arrow that has to pass another node is offered as a bare line: its label would sit on that node.
       const link = makeLink(from.id, to.id, label);
       const crosses = arrowHitsShape(link, byId, solid, 4) !== null;
@@ -570,6 +654,7 @@ export function connectionOptions(input: ConnectionInput): PredictedAction[] {
         feedbackKeys: ["cat:connect"],
         addElements: [crosses ? { ...link, label: "" } : link],
         focusId: node.id,
+        usual: strength >= SENSIBLE,
       };
     });
 }
@@ -589,11 +674,12 @@ export const NO_OPTION = -1;
 
 /**
  * Which suggestion Enter takes on the empty bar before the user picks one: the first, when it is a connection
- * of the node they just added. Anything else (a node nobody typed, a bigger diagram) needs to be picked first.
+ * of the node they just added and the usual one for that pair. Anything else (a node nobody typed, a bigger
+ * diagram, a connection that is only a guess) needs to be picked first.
  */
 export function enterDefaultIndex(options: PredictedAction[], justAddedId: string | null): number {
   const first = options[0];
-  return first && justAddedId && isConnectionOf(first, justAddedId) ? 0 : NO_OPTION;
+  return first && justAddedId && isConnectionOf(first, justAddedId) && first.usual !== false ? 0 : NO_OPTION;
 }
 
 /** Tab and Shift+Tab over the suggestions; from "nothing picked" they land on the first and the last. */
