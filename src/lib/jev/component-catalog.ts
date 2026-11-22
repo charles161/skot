@@ -118,6 +118,19 @@ export const CATALOG: Component[] = [
 ];
 export const BY_KEY = new Map(CATALOG.map((c) => [c.key, c]));
 
+/** Which roles naturally come next after a node of a role (client -> edge -> service -> data). */
+export const NEXT_ROLES: Record<Role, Role[]> = {
+  client: ["edge"],
+  edge: ["service"],
+  service: ["store", "cache", "queue", "external"],
+  worker: ["store", "external"],
+  queue: ["worker"],
+  cache: ["store"],
+  store: ["store", "cache", "storage"],
+  storage: ["worker"],
+  external: ["queue"],
+};
+
 export const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
 export const words = (s: string) => s.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 
@@ -141,6 +154,12 @@ export function componentForLabel(label: string): Component | null {
     if (hit) return hit;
   }
   return null;
+}
+
+/** The part a board node plays in the usual flow, or null when its name says nothing about it. */
+export function roleOf(el: LabeledNode): Role | null {
+  if (el.kind === "actor") return "client";
+  return componentForLabel(el.label)?.role ?? null;
 }
 
 /** Same node by name, by catalog identity ("Postgres" is "Postgres DB"), or both being the client. */

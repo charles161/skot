@@ -27,7 +27,8 @@ describe("blank board: the flow reads left to right", () => {
       ],
     },
   });
-  for (const o of [...res.options, ...refined.options]) {
+  // Option (a) is the one typed node ("URL Shortener"); the flow is in the two bigger options.
+  for (const o of [...res.options.slice(1), ...refined.options.slice(1)]) {
     it(`${o.tier} (${o.source}): Client sits left of Shortener API`, () => {
       const client = shapes(o).find((s) => s.label === "Client")!;
       const api = shapes(o).find((s) => s.label === "Shortener API")!;

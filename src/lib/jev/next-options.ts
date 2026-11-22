@@ -7,22 +7,35 @@
  * The lexicon and templates here answer instantly; the Gateway LLM can rename and reshape the cluster and
  * full options later (refineOptionsWithGraphs), and jev ranks the three.
  */
-import { inferToneFromLabel } from "./colors";
 import {
   BY_KEY,
   CATALOG,
   componentByExactName,
   componentForLabel,
   findBoardCounterpart,
+  NEXT_ROLES,
   norm,
+  roleOf,
   sameThing,
   words,
   type CatalogLink,
   type Component,
   type Role,
 } from "./component-catalog";
-import { getElementCenter, makeSeed, uid } from "./geometry";
-import { DEFAULT_KIND_SIZE, isComponentShape } from "./notation-kinds";
+import {
+  connectionOptions,
+  isFlowText,
+  kindForLabel,
+  makeLink,
+  makeShape,
+  planTypedNode,
+  sizeFor,
+  typedNodeLabel,
+  typedNodeOption,
+  type TypedNodePlan,
+} from "./core-loop";
+import { getElementCenter, makeSeed, uid, type Rect } from "./geometry";
+import { isComponentShape } from "./notation-kinds";
 import { arrowHitsShape, labelRect, rectsIntersect } from "./ghost-geometry";
 import { layeredGhostLayout } from "./ghost-layout";
 import {
@@ -49,18 +62,6 @@ import {
 
 // ------------------------------------------------------------------ catalog
 
-/** Which roles naturally come next after a node of a role (client -> edge -> service -> data). */
-const NEXT_ROLES: Record<Role, Role[]> = {
-  client: ["edge"],
-  edge: ["service"],
-  service: ["store", "cache", "queue", "external"],
-  worker: ["store", "external"],
-  queue: ["worker"],
-  cache: ["store"],
-  store: ["store", "cache", "storage"],
-  storage: ["worker"],
-  external: ["queue"],
-};
 const ROLE_RANK: Record<Role, number> = {
   client: 0,
   edge: 1,
@@ -282,11 +283,6 @@ const SYSTEMS: SystemDef[] = [
 ];
 
 // ------------------------------------------------------------------ matching
-
-function roleOf(el: JevElement): Role | null {
-  if (el.kind === "actor") return "client";
-  return componentForLabel(el.label)?.role ?? null;
-}
 
 function aliasScore(text: string, names: string[]): number {
   let best = 0;
@@ -581,7 +577,7 @@ function describedDrafts(text: string, anchor: JevElement | null): Draft[] | nul
   if (local.nodes.length < 3) return null;
   const nodes: DraftNode[] = local.nodes.map((n) => ({
     key: n.id,
-    label: n.label.trim(),
+    label: typedNodeLabel(n.label),
     sublabel: n.sublabel,
     kind: (n.kind === "text" ? "node" : n.kind) as ShapeKind,
   }));
@@ -609,7 +605,7 @@ function flowDrafts(text: string, elements: JevElement[], anchor: JevElement | n
   const local = buildLocalSemanticGraphFromPrompt(text).graph;
   const nodes: DraftNode[] = local.nodes.map((n) => ({
     key: n.id,
-    label: n.label.trim(),
+    label: typedNodeLabel(n.label),
     sublabel: n.sublabel,
     kind: (n.kind === "text" ? "node" : n.kind) as ShapeKind,
   }));
@@ -856,69 +852,8 @@ function multiDrafts(shapes: JevElement[], elements: JevElement[]): Draft[] {
 
 const isBoardShape = (e: JevElement): boolean => isComponentShape(e);
 
-function kindForLabel(label: string): ShapeKind {
-  const comp = componentByExactName(label);
-  if (comp) return comp.kind;
-  const kind = buildLocalSemanticGraphFromPrompt(label.replace(/[,;]/g, " ")).graph.nodes[0]?.kind;
-  return kind && kind !== "text" ? (kind as ShapeKind) : "node";
-}
-
 function fakeShape(label: string, kind: ShapeKind = "node"): JevElement {
   return { id: `fake_${norm(label)}`, kind, label, x: 0, y: 0, width: 0, height: 0, tone: "ink", seed: 0, createdAt: 0, updatedAt: 0 };
-}
-
-const SIZE_OVERRIDES: Partial<Record<ShapeKind, { width: number; height: number }>> = {
-  node: { width: 172, height: 72 },
-  database: { width: 156, height: 86 },
-  lb: { width: 168, height: 80 },
-  cache: { width: 156, height: 80 },
-  queue: { width: 180, height: 68 },
-  external: { width: 172, height: 72 },
-  blob: { width: 140, height: 92 },
-  actor: { width: 80, height: 112 },
-};
-const sizeFor = (kind: ShapeKind) => SIZE_OVERRIDES[kind] ?? DEFAULT_KIND_SIZE[kind] ?? { width: 172, height: 72 };
-
-function makeShape(kind: ShapeKind, label: string, sublabel: string | undefined, at: Point): JevElement {
-  const id = uid("el");
-  const size = sizeFor(kind);
-  const now = Date.now();
-  return {
-    id,
-    kind,
-    x: Math.round(at.x),
-    y: Math.round(at.y),
-    width: size.width,
-    height: size.height,
-    label,
-    ...(sublabel && kind !== "actor" ? { sublabel } : {}),
-    tone: inferToneFromLabel(label),
-    seed: makeSeed(id),
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
-function makeLink(fromId: string, toId: string, label: string, dashed?: boolean): JevElement {
-  const id = uid("arr");
-  const now = Date.now();
-  return {
-    id,
-    kind: "arrow",
-    x: 0,
-    y: 0,
-    width: 0,
-    height: 0,
-    label,
-    tone: "ink",
-    seed: makeSeed(id),
-    fromId,
-    toId,
-    arrowStyle: "curved",
-    ...(dashed ? { dashed } : {}),
-    createdAt: now,
-    updatedAt: now,
-  };
 }
 
 interface Context {
@@ -929,6 +864,11 @@ interface Context {
   selectedIds?: string[];
   /** Typed text may pad with general names; follow-ups after an action may not. */
   allowGeneric?: boolean;
+  /**
+   * The node Enter adds for the typed text, listed in `elements` as if it were on the board already: a bigger
+   * option that contains the same thing builds around it, so the ghost stays put when Tab moves to that option.
+   */
+  pinnedId?: string;
 }
 
 interface Materialized {
@@ -939,6 +879,8 @@ interface Materialized {
   reused: string[];
   attachedTo: string[];
   focusId?: string;
+  /** The option builds on the pinned typed node (which is then one of its shapes). */
+  pinned?: boolean;
 }
 
 function upstreamOf(anchor: JevElement, elements: JevElement[]): string | null {
@@ -948,11 +890,20 @@ function upstreamOf(anchor: JevElement, elements: JevElement[]): string | null {
 
 function materialize(draft: Draft, ctx: Context): Materialized {
   const { elements, anchor } = ctx;
-  const boardShapes = elements.filter(isBoardShape);
+  // The pinned typed node is matched by name only: it is never a stand-in for "the board's database".
+  const pin = ctx.pinnedId ? elements.find((e) => e.id === ctx.pinnedId) ?? null : null;
+  const isPin = (node: DraftNode) => {
+    if (!pin) return false;
+    if (norm(pin.label) === norm(node.label)) return true;
+    const a = componentByExactName(pin.label);
+    return a !== null && a.key === componentByExactName(node.label)?.key;
+  };
+  const boardShapes = elements.filter((e) => isBoardShape(e) && e.id !== pin?.id);
   const byId = new Map(elements.map((e) => [e.id, e]));
   const resolved = new Map<string, string>();
   const fresh: Array<DraftNode & { id: string }> = [];
   const reused: string[] = [];
+  let pinned = false;
   const wired = new Set(
     anchor
       ? elements.flatMap((e) => (e.kind === "arrow" && (e.fromId === anchor.id || e.toId === anchor.id) ? [e.fromId ?? "", e.toId ?? ""] : []))
@@ -962,10 +913,15 @@ function materialize(draft: Draft, ctx: Context): Materialized {
   for (const node of draft.nodes) {
     const probe = node.matchLabel ? { ...node, label: node.matchLabel } : node;
     const preferAnchor = anchor && sameThing(anchor, probe) ? anchor : null;
-    const match = preferAnchor ?? boardShapes.find((e) => sameThing(e, probe)) ?? findBoardCounterpart(probe, boardShapes, wired);
+    const match =
+      preferAnchor ??
+      boardShapes.find((e) => sameThing(e, probe)) ??
+      (isPin(probe) ? pin : null) ??
+      findBoardCounterpart(probe, boardShapes, wired);
     if (match) {
       resolved.set(node.key, match.id);
-      if (match.id !== anchor?.id && !ctx.selectedIds?.includes(match.id) && !reused.includes(match.label)) {
+      if (match.id === ctx.pinnedId) pinned = true;
+      else if (match.id !== anchor?.id && !ctx.selectedIds?.includes(match.id) && !reused.includes(match.label)) {
         reused.push(match.label);
       }
       continue;
@@ -1088,7 +1044,16 @@ function materialize(draft: Draft, ctx: Context): Materialized {
     )
   );
   const focus = draft.focusKey ? resolveKey(draft.focusKey) : null;
-  return { shapes, arrows, dropped, reused, attachedTo, focusId: focus ?? shapes[0]?.id ?? arrows[0]?.toId };
+  const pinnedEl = pinned ? byId.get(ctx.pinnedId!) : undefined;
+  return {
+    shapes: pinnedEl ? [pinnedEl, ...shapes] : shapes,
+    arrows,
+    dropped,
+    reused,
+    attachedTo: pinnedEl ? attachedTo.filter((label) => label !== pinnedEl.label) : attachedTo,
+    focusId: focus ?? shapes[0]?.id ?? arrows[0]?.toId,
+    pinned,
+  };
 }
 
 function nearestShape(shapes: JevElement[], to: Point): JevElement | null {
@@ -1180,6 +1145,8 @@ export interface NextOptionsInput {
   /** The node the user touched last (just added, applied or renamed). */
   subjectId?: string;
   viewportCenter?: Point;
+  /** The visible part of the board: a typed node is placed beside something the user can see. */
+  viewport?: Rect;
 }
 
 /** What the server needs to rank the options with jev and reshape (b) and (c) with the Gateway LLM. */
@@ -1200,7 +1167,10 @@ export interface NextOptionsResult {
   options: PredictedAction[];
   concept: PredictedConcept;
   anchorId: string | null;
-  request: NextOptionsRequest;
+  /** Null when there is nothing for the server to rank (fewer than three options). */
+  request: NextOptionsRequest | null;
+  /** The node Enter creates for the typed text (option (a)); null for a flow, a selection or a follow-up. */
+  typed: TypedNodePlan | null;
   /** Inputs to rebuild (b) and (c) in place when the LLM answers. */
   context: {
     anchorId: string | null;
@@ -1266,9 +1236,28 @@ function draftsFor(input: NextOptionsInput, ctx: Context, concept: Concept | nul
   return subject ? subjectDrafts(subject, ctx.elements) : null;
 }
 
-function finish(drafts: Draft[], ctx: Context): PredictedAction[] | null {
-  const built = drafts.map((d) => ({ draft: d, m: materialize(d, ctx) }));
-  if (built[0].m.shapes.length === 0 && built[0].m.arrows.length === 0) {
+const pinTypedNode = (ctx: Context, node: JevElement): Context => ({ ...ctx, elements: [...ctx.elements, node], pinnedId: node.id });
+
+/** A bigger option builds around the typed node when it contains the same thing; otherwise it stands on its own. */
+function materializeAround(draft: Draft, ctx: Context, pinnedCtx: Context | null): Materialized {
+  const around = pinnedCtx ? materialize(draft, pinnedCtx) : null;
+  return around?.pinned ? around : materialize(draft, ctx);
+}
+
+/**
+ * `typed` is the node Enter creates for the Thought Bar text: it is option (a) as is, and the cluster and full
+ * options grow from there. A typed flow ("app -> api") is exactly its own nodes and arrows, never padded.
+ */
+function finish(drafts: Draft[], ctx: Context, typed: PredictedAction | null, exact: boolean): PredictedAction[] | null {
+  const pinnedCtx = typed ? pinTypedNode(ctx, typed.addElements[0]) : null;
+  const build = (draft: Draft, bigger: boolean): Materialized => materializeAround(draft, ctx, bigger ? pinnedCtx : null);
+  const built = drafts.map((d, i) => ({ draft: d, m: build(d, i > 0) }));
+  if (typed) {
+    built[0] = {
+      draft: built[0].draft,
+      m: { shapes: typed.addElements, arrows: [], dropped: [], reused: [], attachedTo: [], focusId: typed.focusId },
+    };
+  } else if (!exact && built[0].m.shapes.length === 0 && built[0].m.arrows.length === 0) {
     const next = built[1].draft.nodes.find((n) => !built[0].draft.nodes.includes(n));
     if (next) {
       const base = built[0].draft;
@@ -1285,13 +1274,17 @@ function finish(drafts: Draft[], ctx: Context): PredictedAction[] | null {
     let guard = 0;
     while (built[i].m.shapes.length <= built[i - 1].m.shapes.length && guard < 3) {
       const draft = grow(built[i].draft, built[i - 1].m.shapes.length, ctx);
-      built[i] = { draft, m: materialize(draft, ctx) };
+      built[i] = { draft, m: build(draft, true) };
       guard += 1;
     }
   }
   // A follow-up that cannot grow without filler is not offered at all.
   if (!ctx.allowGeneric && built.some((b, i) => i > 0 && b.m.shapes.length <= built[i - 1].m.shapes.length)) return null;
-  return harmonizeEdgeLabels(built.map(({ draft, m }) => toOption(draft, m, ctx)), ctx.elements);
+  // Neither is an option that would add nothing (prod 22 Nov: an untitled "link only" card that did nothing).
+  if (built.some((b) => b.m.shapes.length === 0 && b.m.arrows.length === 0)) return null;
+  const board = pinnedCtx?.elements ?? ctx.elements;
+  const options = harmonizeEdgeLabels(built.map(({ draft, m }) => toOption(draft, m, m.pinned && pinnedCtx ? pinnedCtx : ctx)), board);
+  return typed ? [typed, ...options.slice(1)] : options;
 }
 
 /** Exactly three options, small to big, for the Thought Bar text, the selection, or the last-touched node. */
@@ -1299,29 +1292,65 @@ export function buildNextOptions(input: NextOptionsInput): NextOptionsResult | n
   const elements = input.elements;
   const shapes = elements.filter(isBoardShape);
   const text = input.text?.trim() ?? "";
-  if (text && norm(text).length < 2) return null;
+  const viewportCenter = input.viewportCenter ?? { x: 400, y: 300 };
+  const flow = isFlowText(text);
+  // What Enter creates for the typed text. It never depends on the catalog, the templates or the AI below.
+  const plan =
+    text && !flow
+      ? planTypedNode({
+          text,
+          elements,
+          selectedIds: input.selectedIds,
+          lastFocusedId: input.subjectId,
+          viewportCenter,
+          viewport: input.viewport,
+        })
+      : null;
+  const typed = plan ? typedNodeOption(plan, elements) : null;
   const firstPass = text ? resolveConcept(text, null) : null;
   const anchor = pickAnchor(input, shapes, firstPass);
   const concept = text ? resolveConcept(text, anchor) : null;
-  const viewportCenter = input.viewportCenter ?? { x: 400, y: 300 };
   const ctx: Context = { elements, anchor, viewportCenter, selectedIds: input.selectedIds, allowGeneric: Boolean(text) || (input.selectedIds ?? []).length >= 1 };
   const raw = draftsFor(input, ctx, concept, shapes);
-  if (!raw) return null;
   const subjectEl = !text && (input.selectedIds ?? []).length <= 1 ? anchor : null;
-  const drafts = adaptDrafts(raw, domainWord(text ? anchor : subjectEl));
-  const options = finish(drafts, ctx);
-  if (!options) return null;
+  const options = raw ? finish(adaptDrafts(raw, domainWord(text ? anchor : subjectEl)), ctx, typed, flow) : null;
 
   const selected = (input.selectedIds ?? []).map((id) => shapes.find((s) => s.id === id)).filter((x): x is JevElement => Boolean(x));
   const predicted = text ? predictConcept(text, elements, anchor) : null;
-  const conceptLabel = predicted?.label ?? (selected.length >= 2 ? selected.map((s) => s.label).join(" + ") : anchor?.label ?? "");
+  const conceptLabel = typed?.title ?? predicted?.label ?? (selected.length >= 2 ? selected.map((s) => s.label).join(" + ") : anchor?.label ?? "");
+  const context = {
+    anchorId: anchor?.id ?? null,
+    viewportCenter,
+    conceptKey: concept?.type === "component" ? concept.comp.key : null,
+    conceptLabel,
+    selectedIds: input.selectedIds ?? [],
+  };
+  const beside = plan?.anchorId ? elements.find((e) => e.id === plan.anchorId)?.label : "";
+  const typedIntent: SpatialIntent | null = typed
+    ? {
+        kind: "prompt_follow_up",
+        headline: `Enter adds ${typed.title}`,
+        detail: beside ? `beside ${beside}` : "a new node",
+        subjectId: plan?.anchorId ?? undefined,
+        relatedIds: [],
+        timestamp: Date.now(),
+      }
+    : null;
+
+  if (!options) {
+    // Nothing bigger to offer (a one-letter name, an unknown word with no next steps): Enter still adds the node.
+    if (!typed || !typedIntent) return null;
+    return { intent: typedIntent, options: [typed], concept: { label: typed.title }, anchorId: plan?.anchorId ?? null, request: null, typed: plan, context };
+  }
+
   const trigger: NextOptionsRequest["trigger"] = text ? "type" : selected.length >= 2 ? "multi" : "select";
   const intent: SpatialIntent =
-    trigger === "type"
+    typedIntent ??
+    (trigger === "type"
       ? {
           kind: "prompt_follow_up",
-          headline: anchor ? `${conceptLabel} from "${anchor.label}"` : conceptLabel,
-          detail: "3 options, small to big",
+          headline: `Enter draws ${options[0].title}`,
+          detail: "the flow as typed",
           subjectId: anchor?.id,
           relatedIds: [],
           timestamp: Date.now(),
@@ -1342,12 +1371,12 @@ export function buildNextOptions(input: NextOptionsInput): NextOptionsResult | n
             subjectId: anchor?.id,
             relatedIds: [],
             timestamp: Date.now(),
-          };
+          });
 
   return {
     intent,
     options,
-    concept: predicted ?? { label: conceptLabel },
+    concept: predicted ? { ...predicted, label: conceptLabel } : { label: conceptLabel },
     anchorId: anchor?.id ?? null,
     request: {
       trigger,
@@ -1358,7 +1387,7 @@ export function buildNextOptions(input: NextOptionsInput): NextOptionsResult | n
       boardLabels: shapes.map((s) => s.label.trim().slice(0, 80)).filter(Boolean).slice(0, 40),
       options: options.map((o) => ({
         id: o.tier!,
-        title: o.title.slice(0, 120),
+        title: o.title.slice(0, 120) || "option",
         description: o.subtitle.slice(0, 140),
         nodes: o.nodeCount ?? 0,
       })),
@@ -1368,13 +1397,43 @@ export function buildNextOptions(input: NextOptionsInput): NextOptionsResult | n
         edges: edgeLines(options[2], elements).slice(0, 20),
       },
     },
-    context: {
-      anchorId: anchor?.id ?? null,
-      viewportCenter,
-      conceptKey: concept?.type === "component" ? concept.comp.key : null,
-      conceptLabel,
-      selectedIds: input.selectedIds ?? [],
+    typed: plan,
+    context,
+  };
+}
+
+/**
+ * What is offered right after a node is added: its connections to the board first (never applied on their
+ * own), then the usual next steps to fill up to three. With nothing to connect to, the usual three options.
+ */
+export function buildAfterCreateOptions(input: {
+  elements: JevElement[];
+  nodeId: string;
+  anchorIds?: string[];
+  viewportCenter?: Point;
+}): NextOptionsResult | null {
+  const next = buildNextOptions({ elements: input.elements, subjectId: input.nodeId, viewportCenter: input.viewportCenter });
+  const links = connectionOptions({ elements: input.elements, nodeId: input.nodeId, anchorIds: input.anchorIds });
+  if (links.length === 0) return next;
+  // The links are already offered above: a next step that is only another link would say the same thing twice.
+  const steps = (next?.options ?? []).filter((o) => o.addElements.some((e) => e.kind !== "arrow"));
+  const node = input.elements.find((e) => e.id === input.nodeId)!;
+  const viewportCenter = input.viewportCenter ?? { x: 400, y: 300 };
+  return {
+    intent: {
+      kind: "domain_continue",
+      headline: `Connect ${node.label || node.kind}?`,
+      detail: "Enter accepts, typing skips",
+      subjectId: node.id,
+      relatedIds: [],
+      timestamp: Date.now(),
     },
+    options: [...links, ...steps].slice(0, 3),
+    concept: { label: node.label },
+    anchorId: node.id,
+    request: null,
+    typed: null,
+    context: { anchorId: node.id, viewportCenter, conceptKey: null, conceptLabel: node.label, selectedIds: [] },
   };
 }
 
@@ -1495,9 +1554,10 @@ export function structureProblems(option: PredictedAction, elements: JevElement[
 }
 
 /** A bigger option holds every node of the smaller one, so Tab only ever adds to the picture. */
-function containsNodesOf(bigger: PredictedAction, smaller: PredictedAction): boolean {
-  const have = new Set(bigger.addElements.filter((e) => e.kind !== "arrow").map((e) => norm(e.label)));
-  return smaller.addElements.filter((e) => e.kind !== "arrow").every((e) => have.has(norm(e.label)));
+/** The bigger option builds on the smaller one: each of its nodes is in the bigger option or already on the board. */
+function containsNodesOf(bigger: PredictedAction, smaller: PredictedAction, elements: JevElement[]): boolean {
+  const have = [...bigger.addElements, ...elements].filter((e) => e.kind !== "arrow");
+  return smaller.addElements.filter((e) => e.kind !== "arrow").every((e) => have.some((h) => sameThing(h, e)));
 }
 
 /** The same two nodes get the same edge label in every option: the first option that names the edge wins. */
@@ -1529,6 +1589,8 @@ export function refineOptionsWithGraphs(
   elements: JevElement[],
   graphs: { cluster?: LlmOptionGraph | null; full?: LlmOptionGraph | null }
 ): NextOptionsResult {
+  const request = result.request;
+  if (!request || result.options.length < 3) return result;
   const anchor = result.context.anchorId ? elements.find((e) => e.id === result.context.anchorId) ?? null : null;
   const ctx: Context = {
     elements,
@@ -1538,25 +1600,27 @@ export function refineOptionsWithGraphs(
   };
   const [a, b, c] = result.options;
   const size = (o: PredictedAction) => o.nodeCount ?? 0;
-  let nextB = b;
-  let nextC = c;
-  const dropLabel = result.request.trigger === "type" && !result.context.conceptKey ? result.context.conceptLabel : null;
-  if (graphs.cluster && graphs.cluster.nodes.length > 0) {
-    const draft = llmDraft("cluster", graphs.cluster, b, elements, dropLabel);
-    const m = materialize(draft, ctx);
-    const candidate = toOption(draft, m, ctx);
+  // The typed node (a) is its own thing, not the seed of (b): the LLM options build around it when they hold the
+  // same component, and need not contain it otherwise ("URL Shortener" is not a node of its own HLD).
+  const pinnedCtx = result.typed ? pinTypedNode(ctx, result.typed.node) : null;
+  const builds = (candidate: PredictedAction) => Boolean(result.typed) || containsNodesOf(candidate, a, elements);
+  const shape = (draft: Draft) => {
+    const m = materializeAround(draft, ctx, pinnedCtx);
+    const candidate = toOption(draft, m, m.pinned && pinnedCtx ? pinnedCtx : ctx);
     const sound =
       structureProblems({ ...candidate, addElements: [...candidate.addElements, ...m.dropped] }, elements).length === 0 &&
-      containsNodesOf(candidate, a);
+      builds(candidate);
+    return { candidate, sound };
+  };
+  let nextB = b;
+  let nextC = c;
+  const dropLabel = request.trigger === "type" && !result.context.conceptKey ? result.context.conceptLabel : null;
+  if (graphs.cluster && graphs.cluster.nodes.length > 0) {
+    const { candidate, sound } = shape(llmDraft("cluster", graphs.cluster, b, elements, dropLabel));
     if (sound && size(candidate) > size(a) && size(candidate) <= 5 && size(candidate) >= size(b) - 1) nextB = candidate;
   }
   if (graphs.full && graphs.full.nodes.length > 0) {
-    const draft = { ...llmDraft("full", graphs.full, b, elements, dropLabel), title: c.title };
-    const m = materialize(draft, ctx);
-    const candidate = toOption(draft, m, ctx);
-    const sound =
-      structureProblems({ ...candidate, addElements: [...candidate.addElements, ...m.dropped] }, elements).length === 0 &&
-      containsNodesOf(candidate, a);
+    const { candidate, sound } = shape({ ...llmDraft("full", graphs.full, b, elements, dropLabel), title: c.title });
     if (sound && size(candidate) > size(nextB) && size(candidate) >= Math.max(5, size(c) - 3)) nextC = candidate;
   }
   if (nextC === c && size(c) <= size(nextB)) nextB = b;
@@ -1565,9 +1629,9 @@ export function refineOptionsWithGraphs(
     ...result,
     options,
     request: {
-      ...result.request,
+      ...request,
       options: options.map((o) => ({ id: o.tier!, title: o.title.slice(0, 120), description: o.subtitle.slice(0, 140), nodes: o.nodeCount ?? 0 })),
-      baseline: { ...result.request.baseline, edges: edgeLines(options[2], elements).slice(0, 20) },
+      baseline: { ...request.baseline, edges: edgeLines(options[2], elements).slice(0, 20) },
     },
   };
 }

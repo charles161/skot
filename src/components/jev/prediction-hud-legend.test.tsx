@@ -8,14 +8,30 @@ const pred = (id: string): PredictedAction => ({ id, title: id, subtitle: "s", c
 const base = { intent: null, predictions: [pred("a"), pred("b"), pred("c")], activeIndex: 0, telemetry: null, onHoverIndex: () => {}, onApply: () => {}, onDismiss: () => {} };
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
 
-describe("the Tab legend says what Tab will do", () => {
-  it("while a completion is pending: Tab complete · Tab cycle", () => {
-    expect(text(renderToStaticMarkup(<PredictionHud {...base} completion="API Gateway" />))).toMatch(/Tab complete · Tab cycle/);
+// Core loop, 22 Nov: the legend names what Enter and Tab do right now, Enter first.
+const node = (id: string): PredictedAction => ({ ...pred(id), addElements: [{ id, kind: "node", label: id, x: 0, y: 0, width: 10, height: 10, tone: "ink", seed: 1, createdAt: 1, updatedAt: 1 }] });
+const link: PredictedAction = { id: "l", title: "App → API", subtitle: "connect · calls", category: "connect", nodeCount: 0, addElements: [{ id: "arr", kind: "arrow", label: "", x: 0, y: 0, width: 0, height: 0, tone: "ink", seed: 1, fromId: "a", toId: "b", createdAt: 1, updatedAt: 1 }] };
+const legend = (html: string) => text(html.match(/<div data-key-legend[^>]*>(.*?)<\/div>/)?.[1] ?? "").trim();
+
+describe("the key legend says what Enter and Tab will do", () => {
+  const typed = { ...base, predictions: [node("a"), node("b"), node("c")], typing: true };
+  it("while typing a partial word: Enter adds the node, Tab completes the word", () => {
+    expect(legend(renderToStaticMarkup(<PredictionHud {...typed} completion="API Gateway" />))).toBe("Enter ↵ add node · Tab complete to API Gateway");
   });
-  it("otherwise: Tab cycle", () => {
-    const t = text(renderToStaticMarkup(<PredictionHud {...base} />));
-    expect(t).toMatch(/Tab cycle/);
-    expect(t).not.toMatch(/complete/);
+  it("while typing a full name: Enter adds the node, Tab reaches the bigger options", () => {
+    expect(legend(renderToStaticMarkup(<PredictionHud {...typed} />))).toBe("Enter ↵ add node · Tab bigger options");
+  });
+  it("after Tab moved to a bigger option: Enter draws that option", () => {
+    expect(legend(renderToStaticMarkup(<PredictionHud {...typed} activeIndex={2} />))).toBe("Enter ↵ draw option 3 · Tab bigger options");
+  });
+  it("on an offered connection: Enter connects, Tab moves on, Esc dismisses", () => {
+    const html = renderToStaticMarkup(<PredictionHud {...base} predictions={[link, node("b"), node("c")]} />);
+    expect(legend(html)).toBe("Enter ↵ connect · Tab next option · Esc dismiss");
+    expect(text(html)).toMatch(/Connect or grow/);
+  });
+  it("never shows where an option came from (lexicon, template, LLM)", () => {
+    const sourced = { ...node("a"), source: "lexicon" as const };
+    expect(text(renderToStaticMarkup(<PredictionHud {...typed} predictions={[sourced, node("b"), node("c")]} />))).not.toMatch(/lexicon|template|LLM/);
   });
 });
 

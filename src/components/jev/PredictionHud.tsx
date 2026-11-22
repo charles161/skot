@@ -6,7 +6,6 @@ import { useAiQuiet } from "@/lib/jev/ai-quiet";
 import {
   isJevModelSource,
   JevTelemetry,
-  type OptionSource,
   type OptionTier,
   PredictedAction,
   SpatialIntent,
@@ -22,15 +21,31 @@ interface PredictionHudProps {
   onDismiss: () => void;
   /** Set while the Thought Bar text is a partial word: the first Tab completes it, later Tabs cycle. */
   completion?: string | null;
+  /** The options are for the text in the Thought Bar: Enter adds option 1 unless the user moved the highlight. */
+  typing?: boolean;
 }
 
 const TIER_LABEL: Record<OptionTier, string> = { minimal: "small", cluster: "cluster", full: "full" };
-const SOURCE_LABEL: Record<OptionSource, string> = {
-  lexicon: "lexicon",
-  template: "template",
-  llm: "LLM",
-  board: "your board",
-};
+
+const KEY = "rounded border border-border bg-secondary px-1.5 py-0.5 font-semibold text-foreground";
+const KEY_PRIMARY =
+  "rounded border border-[#2563EB]/30 bg-[#2563EB]/10 px-1.5 py-0.5 font-semibold text-[#1D4ED8] dark:border-[#38BDF8]/30 dark:bg-[#38BDF8]/15 dark:text-[#38BDF8]";
+
+/** What Enter and Tab do right now, in the order the user reaches for them. */
+function keyLegend(typing: boolean, completion: string | null, active: PredictedAction | undefined, activeIndex: number) {
+  const adds = active?.addElements.some((e) => e.kind !== "arrow") ?? false;
+  const enter = typing
+    ? activeIndex === 0
+      ? adds && active?.addElements.length === 1
+        ? "add node"
+        : "draw"
+      : `draw option ${activeIndex + 1}`
+    : adds
+      ? "add"
+      : "connect";
+  const tab = typing ? (completion ? `complete to ${completion}` : "bigger options") : "next option";
+  return { enter, tab };
+}
 
 function categoryIcon(cat: PredictedAction["category"]) {
   switch (cat) {
@@ -52,6 +67,7 @@ export function PredictionHud({
   onApply,
   onDismiss,
   completion = null,
+  typing = false,
 }: PredictionHudProps) {
   const aiQuiet = useAiQuiet();
   if (aiQuiet || (!intent && predictions.length === 0)) return null;
@@ -64,6 +80,14 @@ export function PredictionHud({
   const isLiveJev =
     (isJevModelSource(telemetry?.source) || telemetry?.source === "llm-json") &&
     telemetry?.isHeuristic !== true;
+  const legend = keyLegend(typing, completion, predictions[activeIndex], activeIndex);
+  const heading = typing
+    ? "Add it, or go bigger"
+    : predictions.some((p) => p.category === "connect" && !p.tier)
+      ? "Connect or grow"
+      : isTiered
+        ? "Next: small to big"
+        : "Suggestions";
 
   return (
     <div
@@ -93,44 +117,39 @@ export function PredictionHud({
           <div className="flex flex-wrap items-center justify-between gap-2 px-2 pb-1.5 pt-0.5">
             <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
               <span className="font-mono font-semibold uppercase tracking-[0.08em] text-[#1D4ED8] dark:text-[#38BDF8]">
-                {isTiered ? "Next: small to big" : "Top 3 Decisions"}
+                {heading}
               </span>
-              <span
-                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[10px] font-medium ${
-                  isLiveJev
-                    ? "bg-[#0F766E]/12 text-[#0F766E] dark:bg-[#34D399]/15 dark:text-[#34D399]"
-                    : "bg-secondary text-muted-foreground"
-                }`}
-              >
-                <IconCpu className="h-2.5 w-2.5" aria-hidden="true" />
-                {telemetry?.evaluating
-                  ? "jev deciding…"
-                  : isLiveJev
-                    ? `jev · ${telemetry.latencyMs}ms`
-                    : isTiered
-                      ? "lexicon"
-                      : "Heuristic"}
-              </span>
+              {(telemetry?.evaluating || isLiveJev) && (
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[10px] font-medium ${
+                    isLiveJev && !telemetry?.evaluating
+                      ? "bg-[#0F766E]/12 text-[#0F766E] dark:bg-[#34D399]/15 dark:text-[#34D399]"
+                      : "bg-secondary text-muted-foreground"
+                  }`}
+                >
+                  <IconCpu className="h-2.5 w-2.5" aria-hidden="true" />
+                  {telemetry?.evaluating ? "jev deciding…" : "ranked by jev"}
+                </span>
+              )}
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="hidden items-center gap-1 font-mono text-[10.5px] text-muted-foreground sm:flex">
-                {completion && (
+              <div
+                data-key-legend
+                className="hidden items-center gap-1 font-mono text-[10.5px] text-muted-foreground sm:flex"
+              >
+                <kbd className={KEY_PRIMARY}>Enter ↵</kbd>
+                <span>{legend.enter}</span>
+                <span aria-hidden="true">·</span>
+                <kbd className={KEY}>Tab</kbd>
+                <span className="max-w-[16rem] truncate">{legend.tab}</span>
+                {!typing && (
                   <>
-                    <kbd className="rounded border border-border bg-secondary px-1.5 py-0.5 font-semibold text-foreground">
-                      Tab
-                    </kbd>
-                    <span>complete ·</span>
+                    <span aria-hidden="true">·</span>
+                    <kbd className={KEY}>Esc</kbd>
+                    <span>dismiss</span>
                   </>
                 )}
-                <kbd className="rounded border border-border bg-secondary px-1.5 py-0.5 font-semibold text-foreground">
-                  Tab
-                </kbd>
-                <span>cycle</span>
-                <kbd className="ml-1 rounded border border-[#2563EB]/30 bg-[#2563EB]/10 px-1.5 py-0.5 font-semibold text-[#1D4ED8] dark:border-[#38BDF8]/30 dark:bg-[#38BDF8]/15 dark:text-[#38BDF8]">
-                  Enter ↵
-                </kbd>
-                <span>apply</span>
               </div>
               <button
                 type="button"
@@ -146,9 +165,9 @@ export function PredictionHud({
           <div className={`grid grid-cols-1 gap-1.5 ${predictions.length > 1 ? "sm:grid-cols-3" : ""}`}>
             {predictions.map((pred, idx) => {
               const isActive = idx === activeIndex;
-              // Tiered options are all worth choosing: only jev's pick carries its percentage.
+              // The order and the highlight are the board's; jev's pick alone carries its percentage.
               const pct =
-                isLiveJev && typeof pred.probability === "number" && (!isTiered || idx === jevPick)
+                isLiveJev && typeof pred.probability === "number" && idx === jevPick
                   ? Math.max(1, Math.round(pred.probability * 100))
                   : null;
 
@@ -157,8 +176,11 @@ export function PredictionHud({
                   key={pred.id}
                   type="button"
                   aria-pressed={isActive}
+                  data-option-category={pred.category}
                   title={pred.subtitle}
-                  onMouseEnter={() => onHoverIndex(idx)}
+                  onMouseMove={() => {
+                    if (!isActive) onHoverIndex(idx);
+                  }}
                   onClick={() => onApply(idx)}
                   className={`group relative flex min-h-[44px] flex-col gap-1.5 overflow-hidden rounded-xl border px-3 py-2 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                     isActive
@@ -197,26 +219,27 @@ export function PredictionHud({
                           </span>
                         )}
                       </div>
-                      <p className="mt-0.5 flex items-start gap-1 text-[11px] leading-snug text-muted-foreground">
+                      <p className="mt-0.5 hidden items-start gap-1 text-[11px] leading-snug text-muted-foreground sm:flex">
                         <span className="shrink-0 opacity-75" aria-hidden="true">
                           {categoryIcon(pred.category)}
                         </span>
                         <span className="break-words">{pred.subtitle}</span>
                       </p>
-                      {pred.tier && (
-                        <p className="mt-1 flex items-center gap-1.5 overflow-hidden whitespace-nowrap font-mono text-[10px] text-muted-foreground/90">
-                          <span
-                            data-option-tier={pred.tier}
-                            className={`shrink-0 rounded px-1 py-px font-semibold uppercase tracking-[0.06em] ${
-                              isActive ? "bg-[#2563EB]/12 text-[#1D4ED8] dark:bg-[#38BDF8]/15 dark:text-[#38BDF8]" : "bg-secondary"
-                            }`}
-                          >
-                            {TIER_LABEL[pred.tier]}
-                          </span>
-                          <span className="shrink-0" data-option-nodes={pred.nodeCount ?? 0}>
+                      {typeof pred.nodeCount === "number" && (
+                        <p className="mt-1 hidden items-center gap-1.5 overflow-hidden whitespace-nowrap font-mono text-[10px] text-muted-foreground/90 sm:flex">
+                          {pred.tier && (
+                            <span
+                              data-option-tier={pred.tier}
+                              className={`shrink-0 rounded px-1 py-px font-semibold uppercase tracking-[0.06em] ${
+                                isActive ? "bg-[#2563EB]/12 text-[#1D4ED8] dark:bg-[#38BDF8]/15 dark:text-[#38BDF8]" : "bg-secondary"
+                              }`}
+                            >
+                              {TIER_LABEL[pred.tier]}
+                            </span>
+                          )}
+                          <span className="shrink-0" data-option-nodes={pred.nodeCount}>
                             {pred.nodeCount === 0 ? "link only" : `+${pred.nodeCount} node${pred.nodeCount === 1 ? "" : "s"}`}
                           </span>
-                          {pred.source && <span className="truncate opacity-70">· {SOURCE_LABEL[pred.source]}</span>}
                         </p>
                       )}
                     </div>

@@ -75,7 +75,9 @@ import {
   morphSelectionToNotation,
   validateMorphSemanticSpec,
 } from "@/lib/jev/notation-morph";
+import { isFlowText, planTypedNode } from "@/lib/jev/core-loop";
 import {
+  buildAfterCreateOptions,
   buildNextOptions,
   predictConcept,
   refineOptionsWithGraphs,
@@ -332,6 +334,12 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   }, []);
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  /** The node the app selected after adding it. Only a selection the user made themselves anchors the next node. */
+  const [appSelectedId, setAppSelectedId] = useState<string | null>(null);
+  const userSelectedIds = useMemo(
+    () => (selectedIds.length === 1 && selectedIds[0] === appSelectedId ? [] : selectedIds),
+    [selectedIds, appSelectedId]
+  );
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [canvasInteracting, setCanvasInteracting] = useState(false);
   const [tool, setTool] = useState<ToolType>("select");
@@ -375,10 +383,13 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
 
   const [thoughtPrompt, setThoughtPrompt] = useState("");
   const viewportCenterRef = useRef<Point>({ x: 400, y: 300 });
+  const viewportWorldRef = useRef<Rect | undefined>(undefined);
   /** The options on screen came from the Thought Bar text (cleared when the text is). */
   const typedModeRef = useRef(false);
   const typedResultRef = useRef<NextOptionsResult | null>(null);
-  /** The user pressed Tab / hovered since these options appeared: late AI answers must not move the highlight. */
+  /** The Thought Bar text `typedResultRef` was built for: Enter commits that preview only for the same text. */
+  const typedTextRef = useRef("");
+  /** The user pressed Tab / hovered since these options appeared: late LLM answers must not replace the option they chose. */
   const optionsTouchedRef = useRef(false);
   const optionsAbortRef = useRef<AbortController | null>(null);
   const optionAnswersRef = useRef(new Map<string, NextOptionsAnswer>());
@@ -514,6 +525,8 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         onRanked?: (top: PredictedAction[]) => void;
         /** False keeps the pool as is: no LLM-proposed nodes are mixed in (pen-stroke conversions). */
         mergeContext?: boolean;
+        /** jev's probabilities are written onto the options already on screen; their order and the highlight stay. */
+        keepOrder?: boolean;
       } = {}
     ) => {
       if (aiQuietRef.current) return;
@@ -523,7 +536,8 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       const controller = new AbortController();
       decideAbortRef.current = controller;
       opts.signal?.addEventListener("abort", () => controller.abort(), { once: true });
-      const rankingContext = buildRankingContext(nextIntent, currentEls, boardTitleRef.current);
+      const rankingContext =
+        opts.mergeContext === false ? null : buildRankingContext(nextIntent, currentEls, boardTitleRef.current);
 
       const feedbackProfile = loadFeedbackProfile(getBrowserStorage());
       const preferenceSummary = buildFeedbackPreferenceSummary(feedbackProfile);
@@ -578,6 +592,19 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         const isLiveModel =
           isJevModelSource(data.source) && data.isHeuristic !== true;
         const probs = isLiveModel ? data.nextActionProbabilities ?? null : null;
+        if (opts.keepOrder) {
+          setPredictions((prev) =>
+            prev.map((p) => (probs && typeof probs[p.id] === "number" ? { ...p, probability: probs[p.id] } : p))
+          );
+          setTelemetry({
+            source: isLiveModel ? data.source : "heuristic",
+            model: data.model,
+            isHeuristic: !isLiveModel,
+            latencyMs: data.latencyMs,
+            evaluating: false,
+          });
+          return;
+        }
         const ranked = (
           probs
             ? candidates
@@ -1005,12 +1032,13 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
 
   useEffect(() => {
     viewportCenterRef.current = viewportCenterWorld;
-  }, [viewportCenterWorld]);
+    viewportWorldRef.current = viewportWorld;
+  }, [viewportCenterWorld, viewportWorld]);
 
   /**
-   * Shows three tiered options at once (lexicon / templates, instant), then asks the server to rank them
-   * with jev and reshape (b) and (c) with the Gateway LLM. Late answers never move a highlight the user
-   * already chose, and never replace the option being previewed after the user pressed Tab.
+   * Shows the options at once (all local, instant), then asks the server to rank them with jev and reshape
+   * (b) and (c) with the Gateway LLM. The highlight only moves when the user moves it: jev's pick is shown
+   * as a percentage, and a late answer never replaces the option being previewed after the user pressed Tab.
    */
   const presentNextOptions = useCallback(
     (
@@ -1025,10 +1053,16 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       optionsTouchedRef.current = Boolean(opts.keepMinimal);
       recordSuggestionShown(getBrowserStorage(), result.options.flatMap((o) => o.feedbackKeys ?? []));
 
+      decideAbortRef.current?.abort();
       optionsAbortRef.current?.abort();
       const controller = new AbortController();
       optionsAbortRef.current = controller;
       opts.signal?.addEventListener("abort", () => controller.abort(), { once: true });
+      const request = result.request;
+      if (!request) {
+        setTelemetry(null);
+        return;
+      }
 
       const apply = (answer: NextOptionsAnswer) => {
         if (controller.signal.aborted) return;
@@ -1038,15 +1072,11 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
           ...o,
           probability: live && o.tier ? answer.probabilities?.[o.tier] : undefined,
         }));
-        const best = live
-          ? ranked.reduce((bi, o, i) => ((o.probability ?? 0) > (ranked[bi].probability ?? 0) ? i : bi), 0)
-          : 0;
         setPredictions((prev) => {
           if (prev[0]?.id !== result.options[0].id) return prev;
           if (!optionsTouchedRef.current) return ranked;
           return ranked.map((o, i) => (i === activePredIdxRef.current ? { ...prev[i], probability: o.probability } : o));
         });
-        if (!optionsTouchedRef.current) setActivePredIdx(best);
         if (result === typedResultRef.current) typedResultRef.current = refined;
         setTelemetry({
           source: live ? answer.source : "heuristic",
@@ -1058,11 +1088,11 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       };
 
       const key = JSON.stringify([
-        result.request.trigger,
-        result.request.conceptLabel,
-        result.request.anchorLabel ?? "",
-        result.request.selectedLabels,
-        result.request.boardLabels,
+        request.trigger,
+        request.conceptLabel,
+        request.anchorLabel ?? "",
+        request.selectedLabels,
+        request.boardLabels,
       ]);
       const cached = optionAnswersRef.current.get(key);
       if (cached) {
@@ -1073,7 +1103,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       const timer = window.setTimeout(async () => {
         try {
           const res = await postDecide(
-            { mode: "next_options", ...result.request },
+            { mode: "next_options", ...request },
             { aiQuiet: aiQuietRef.current, signal: controller.signal }
           );
           if (!res || !res.ok || controller.signal.aborted) {
@@ -1099,17 +1129,19 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   const completion = useMemo(() => {
     const text = thoughtPrompt.trim();
     if (!text) return null;
-    const anchor = typingAnchor(elements, text, selectedIds);
+    if (isFlowText(text)) return null;
+    const anchor = typingAnchor(elements, text, userSelectedIds);
     return predictConcept(text, elements, anchor)?.completion ?? null;
-  }, [thoughtPrompt, elements, selectedIds]);
+  }, [thoughtPrompt, elements, userSelectedIds]);
 
-  // Type-ahead: every keystroke (2+ characters) shows the three options for what the text most likely means.
+  // Type-ahead: every keystroke shows what Enter will add (option 1, as a ghost) and two bigger options.
   useEffect(() => {
     const text = thoughtPrompt.trim();
     if (!text || text.startsWith("/") || forkSession || aiQuiet) {
       if (typedModeRef.current) {
         typedModeRef.current = false;
         typedResultRef.current = null;
+        typedTextRef.current = "";
         optionsAbortRef.current?.abort();
         setPredictions([]);
         setIntent(null);
@@ -1119,13 +1151,15 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     const result = buildNextOptions({
       elements: elementsRef.current,
       text,
-      selectedIds,
+      selectedIds: userSelectedIds,
       subjectId: lastTouchedIdRef.current ?? undefined,
       viewportCenter: viewportCenterRef.current,
+      viewport: viewportWorldRef.current,
     });
     if (!result) {
       if (typedModeRef.current) {
         typedResultRef.current = null;
+        typedTextRef.current = "";
         optionsAbortRef.current?.abort();
         setPredictions([]);
         setIntent(null);
@@ -1134,10 +1168,11 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     }
     typedModeRef.current = true;
     typedResultRef.current = result;
+    typedTextRef.current = text;
     const keepMinimal = completedRef.current;
     completedRef.current = false;
     presentNextOptions(result, elementsRef.current, { debounceMs: 150, keepMinimal });
-  }, [thoughtPrompt, elements, selectedIds, forkSession, aiQuiet, presentNextOptions]);
+  }, [thoughtPrompt, elements, userSelectedIds, forkSession, aiQuiet, presentNextOptions]);
 
   const updateElements = useCallback(
     (
@@ -1306,6 +1341,42 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     subjectOptionsRef.current = presentSubjectOptions;
   }, [presentSubjectOptions]);
 
+  /**
+   * After a node is added: its connections to the board are offered first (never applied on their own), then
+   * the usual next steps. The order is the board's; jev only writes its percentages onto it.
+   */
+  const presentAfterCreate = useCallback(
+    (nodeId: string, anchorIds: string[], els: JevElement[]) => {
+      lastTouchedIdRef.current = nodeId;
+      if (aiQuietRef.current) return;
+      const result = buildAfterCreateOptions({ elements: els, nodeId, anchorIds, viewportCenter: viewportCenterRef.current });
+      if (!result) {
+        setPredictions([]);
+        setIntent(null);
+        return;
+      }
+      if (result.request) {
+        presentNextOptions(result, els);
+        return;
+      }
+      optionsAbortRef.current?.abort();
+      optionsTouchedRef.current = false;
+      setIntent(result.intent);
+      setPredictions(result.options);
+      setActivePredIdx(0);
+      setTelemetry(null);
+      void rankWithTypeSafeJev(result.intent, els, result.options, { mergeContext: false, keepOrder: true });
+    },
+    [presentNextOptions, rankWithTypeSafeJev]
+  );
+
+  /** The node the app just added or extended becomes the selection, without counting as the user's own pick. */
+  const focusNode = useCallback((id: string) => {
+    setAppSelectedId(id);
+    setSelectedIds([id]);
+    setInspectorOpen(false);
+  }, []);
+
   const dismissPredictions = useCallback(() => {
     const active = predictions[activePredIdx] ?? predictions[0];
     if (active?.feedbackKeys && active.feedbackKeys.length > 0) {
@@ -1349,9 +1420,9 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         labels: [created.label],
         summary: `Added ${created.label || created.kind}`,
       });
-      presentSubjectOptions(created.id, latest);
+      presentAfterCreate(created.id, [], latest);
     },
-    [presentSubjectOptions, pushEditDelta]
+    [presentAfterCreate, pushEditDelta]
   );
 
   const handleStrokeCreated = useCallback(
@@ -1384,16 +1455,15 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         summary: `Renamed to ${edited.label || edited.kind}`,
       });
       selectionTriggerRef.current?.consume();
-      presentSubjectOptions(edited.id, latest);
+      const wired = latest.some((e) => e.kind === "arrow" && (e.fromId === edited.id || e.toId === edited.id));
+      if (wired) presentSubjectOptions(edited.id, latest);
+      else presentAfterCreate(edited.id, [], latest);
     },
-    [presentSubjectOptions, pushEditDelta]
+    [presentSubjectOptions, presentAfterCreate, pushEditDelta]
   );
 
-  const applyPrediction = useCallback(
-    (idx: number) => {
-      const pred = predictions[idx];
-      if (!pred) return;
-
+  const applyAction = useCallback(
+    (pred: PredictedAction) => {
       if (pred.feedbackKeys && pred.feedbackKeys.length > 0) {
         recordSuggestionAccepted(getBrowserStorage(), pred.feedbackKeys);
       }
@@ -1406,12 +1476,10 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         summary: `Applied ${pred.title}`,
       });
 
-      const fromThoughtBar = typedModeRef.current;
-      if (fromThoughtBar) {
-        typedModeRef.current = false;
-        typedResultRef.current = null;
-        setThoughtPrompt("");
-      }
+      typedModeRef.current = false;
+      typedResultRef.current = null;
+      typedTextRef.current = "";
+      setThoughtPrompt("");
       const nextFocus = pred.focusId
         ? nextElsSnapshot.find((e) => e.id === pred.focusId)
         : undefined;
@@ -1419,16 +1487,86 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       if (placed.length > 0) {
         ensureElementsVisible(placed, { top: 104, right: 64, bottom: 255, left: 64 });
       }
-      if (nextFocus) {
-        setSelectedIds([nextFocus.id]);
-        setInspectorOpen(false);
-        presentSubjectOptions(nextFocus.id, nextElsSnapshot);
-      } else {
+      if (!nextFocus) {
         setPredictions([]);
         setIntent(null);
+        return;
       }
+      focusNode(nextFocus.id);
+      // An accepted link: offer what else the node could connect to before moving on to bigger steps.
+      const acceptedLink = pred.category === "connect" && !pred.tier && placed.length === 0;
+      if (acceptedLink) presentAfterCreate(nextFocus.id, [], nextElsSnapshot);
+      else presentSubjectOptions(nextFocus.id, nextElsSnapshot);
     },
-    [predictions, updateElements, presentSubjectOptions, pushEditDelta, ensureElementsVisible]
+    [updateElements, presentSubjectOptions, presentAfterCreate, focusNode, pushEditDelta, ensureElementsVisible]
+  );
+
+  const applyPrediction = useCallback(
+    (idx: number) => {
+      const pred = predictions[idx];
+      if (pred) applyAction(pred);
+    },
+    [predictions, applyAction]
+  );
+
+  /**
+   * Enter in the Thought Bar. Always the same, with or without AI or network:
+   *   a name            one node with that name, in free space (the ghost shown while typing)
+   *   a flow (a -> b)   the nodes and arrows as typed
+   * A bigger option is drawn only when the user moved the highlight to it themselves.
+   */
+  const submitThought = useCallback(
+    (prompt: string) => {
+      const previewed = typedModeRef.current && typedTextRef.current === prompt ? typedResultRef.current : null;
+      const picked = previewed && activePredIdx > 0 ? predictions[activePredIdx] : null;
+      if (picked) {
+        applyAction(picked);
+        return;
+      }
+      const input = {
+        elements: elementsRef.current,
+        text: prompt,
+        selectedIds: userSelectedIds,
+        viewportCenter: viewportCenterRef.current,
+        viewport: viewportWorldRef.current,
+      };
+      if (isFlowText(prompt)) {
+        const flow = (previewed ?? buildNextOptions({ ...input, subjectId: lastTouchedIdRef.current ?? undefined }))?.options[0];
+        if (flow && flow.addElements.length > 0) {
+          applyAction(flow);
+        } else {
+          setThoughtPrompt("");
+          announceStatus("That flow is already on the board");
+        }
+        return;
+      }
+      const plan = previewed?.typed ?? planTypedNode({ ...input, lastFocusedId: lastTouchedIdRef.current });
+      if (!plan) return;
+      const now = Date.now();
+      const node: JevElement = { ...plan.node, createdAt: now, updatedAt: now };
+      const next = updateElements((prev) => [...prev, node]);
+      pushEditDelta({ op: "add", elementIds: [node.id], labels: [node.label], summary: `Added ${node.label}` });
+      typedModeRef.current = false;
+      typedResultRef.current = null;
+      typedTextRef.current = "";
+      setThoughtPrompt("");
+      ensureElementsVisible([node], { top: 104, right: 64, bottom: 255, left: 64 });
+      focusNode(node.id);
+      announceStatus(`Added ${node.label}`);
+      presentAfterCreate(node.id, plan.anchorIds, next);
+    },
+    [
+      predictions,
+      activePredIdx,
+      userSelectedIds,
+      applyAction,
+      updateElements,
+      pushEditDelta,
+      ensureElementsVisible,
+      focusNode,
+      announceStatus,
+      presentAfterCreate,
+    ]
   );
 
   /** Draws a whole prompt at once (starter cards; the Thought Bar while AI is quiet), then offers next steps. */
@@ -1449,12 +1587,11 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       fitToView(parsed.elements, { top: 104, right: 64, bottom: 255, left: 64 });
       const focus = parsed.focusId ? combined.find((e) => e.id === parsed.focusId) : undefined;
       if (focus) {
-        setSelectedIds([focus.id]);
-        setInspectorOpen(false);
+        focusNode(focus.id);
         if (!aiQuietRef.current) presentSubjectOptions(focus.id, combined);
       }
     },
-    [updateElements, pushEditDelta, fitToView, presentSubjectOptions]
+    [updateElements, pushEditDelta, fitToView, presentSubjectOptions, focusNode]
   );
 
   /** Thought Bar Tab: first complete a partial word ("api" -> "API Gateway"), then cycle the three options. */
@@ -2629,6 +2766,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       forkAbortRef.current?.abort();
       setForkSession(null);
     }
+    setAppSelectedId(null);
     setSelectedIds(ids);
     setInspectorOpen(ids.length === 1);
     selectionTriggerRef.current?.select(ids);
@@ -3431,6 +3569,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
               onApply={applyPrediction}
               onDismiss={dismissPredictions}
               completion={completion}
+              typing={thoughtPrompt.trim().length > 0 && !thoughtPrompt.trimStart().startsWith("/")}
             />
           </div>
         )}
@@ -3462,18 +3601,17 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
           }}
           accessory={<MovesMenu onRun={(move) => moves.run(move)} quiet={aiQuiet} />}
           onSubmit={(prompt) => {
-            if (packs.runPaletteCommand(prompt) || moves.runCommand(prompt)) {
-              setThoughtPrompt("");
-              return;
-            }
-            if (aiQuietRef.current) {
-              drawPromptNow(prompt);
-              setThoughtPrompt("");
-              return;
-            }
-            if (typedModeRef.current && predictions.length > 0) applyPrediction(activePredIdx);
+            if (packs.runPaletteCommand(prompt) || moves.runCommand(prompt)) setThoughtPrompt("");
+            else submitThought(prompt);
           }}
           onClear={() => setThoughtPrompt("")}
+          onSpark={(prompt) => {
+            setThoughtPrompt("");
+            drawPromptNow(prompt);
+          }}
+          submitLabel={isFlowText(thoughtPrompt) || activePredIdx > 0 ? "Draw" : "Add"}
+          focusOnOpen={Boolean(roomId) && !joiningSharedRoom}
+          onEmptyEscape={dismissPredictions}
           onTypedTab={handleThoughtTab}
           onEmptyTab={(reverse) => {
             if (forkSession) {

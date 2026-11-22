@@ -86,8 +86,8 @@ features:
       - src/app/api/jev/decide/route.ts
 
   - id: next-options-typed
-    title: "S1: on a board with Client Dashboard, typing apigateway offers 3 options small to big; (a) is one API Gateway
-      node linked from Client Dashboard, nothing floats detached and nothing is duplicated"
+    title: "S1: on a board with Client Dashboard, typing apigateway offers 3 options small to big; (a) is the one API
+      Gateway node Enter adds, (b) and (c) build around it linked from Client Dashboard, nothing is duplicated"
     check: next-options-typed
     sources:
       - src/components/jev/ThoughtBar.tsx
@@ -95,15 +95,15 @@ features:
       - src/app/api/jev/decide/route.ts
 
   - id: next-options-app
-    title: "Board App, typing api gateway (Charles, prod 21 Nov): one API Gateway linked from App is option (a), never the
-      generic template dropped beside the board"
+    title: "Board App, typing api gateway (Charles, prod 21 Nov): one API Gateway beside App is option (a), never the
+      generic template dropped beside the board; the bigger options link it from App"
     check: next-options-app
     sources:
       - src/components/jev/ThoughtBar.tsx
       - src/components/jev/PredictionHud.tsx
 
   - id: next-options-blank
-    title: "S2: on a blank board, typing url shortener offers a 2-3 node start, a core cluster and the full HLD"
+    title: "S2: on a blank board, typing url shortener offers the one typed node, a small start and the full HLD"
     check: next-options-blank
     sources:
       - src/components/jev/ThoughtBar.tsx
@@ -123,7 +123,7 @@ features:
 
   - id: type-tab-enter
     title: "S5: typing api after Client Dashboard shows the options before the word is finished; Tab completes to API
-      Gateway and Enter draws it connected Client Dashboard -> API Gateway"
+      Gateway, Enter adds it, and a second Enter accepts the offered Client Dashboard -> API Gateway link"
     check: type-tab-enter
     sources:
       - src/components/jev/ThoughtBar.tsx

@@ -348,14 +348,20 @@ def assert_three_tiers(opts):
     assert all(o["title"] for o in opts)
 
 
-def assert_ghost_matches(seen, board, existing_labels):
-    """The previewed ghost is the option itself: its node count, no copy of a board node, joined to the board."""
+def assert_ghost_matches(seen, board, existing_labels, typed=False):
+    """The previewed ghost is the option itself: its node count, no copy of a board node, joined to the board.
+
+    typed=True: the options are for Thought Bar text, so option 1 is the one node Enter adds, with no arrow
+    (core loop, 22 Nov: connections are offered after the node exists, never drawn with it)."""
     board_ids = {e["id"] for e in board if is_shape(e)}
     for i, s in seen.items():
         g, o = s["ghosts"], s["option"]
         labels_ = [x["label"] for x in g["shapes"]]
         assert len(g["shapes"]) == o["nodes"], "option %d says +%s nodes but %d ghosts show: %s" % (
             i + 1, o["nodes"], len(g["shapes"]), labels_)
+        if typed and i == 0:
+            assert len(g["shapes"]) == 1 and not g["arrows"], "option 1 must be the one typed node, no arrows: %s" % g
+            continue
         dup = [lab for lab in labels_ if lab.lower() in {x.lower() for x in existing_labels}]
         assert not dup, "option %d duplicates board nodes %s" % (i + 1, dup)
         if board_ids:
@@ -378,11 +384,12 @@ def test_next_options_typed(page, skot, evidence):
     evidence.note(ai=mode, options=[{k: o[k] for k in ("title", "tier", "nodes", "pct", "text")} for o in opts],
                   ghosts={i + 1: s["ghosts"] for i, s in seen.items()})
     assert len(seen) == 3, "Tab must show all three options, saw %s" % sorted(seen)
-    assert_ghost_matches(seen, skot.elements(), ["Client Dashboard"])
-    a = seen[0]["ghosts"]
+    assert_ghost_matches(seen, skot.elements(), ["Client Dashboard"], typed=True)
+    a, b = seen[0]["ghosts"], seen[1]["ghosts"]
     gw = next(x for x in a["shapes"] if x["label"] == "API Gateway")
-    link = [x for x in a["arrows"] if x["from"] == cd["id"] and x["to"] == gw["id"]]
-    assert link and link[0]["label"], "(a) must link Client Dashboard -> API Gateway with a label: %s" % a["arrows"]
+    assert any(x["id"] == gw["id"] for x in b["shapes"]), "the API Gateway ghost must stay put when Tab moves to (b)"
+    link = [x for x in b["arrows"] if x["from"] == cd["id"] and x["to"] == gw["id"]]
+    assert link and link[0]["label"], "(b) must link Client Dashboard -> API Gateway with a label: %s" % b["arrows"]
 
     while not read_options(page, 3)[2]["active"]:
         page.keyboard.press("Tab")
@@ -412,9 +419,8 @@ def test_next_options_app(page, skot, evidence):
     assert "jev" in (opts[0]["pct"] or "") or mode == "real", "jev must rank the typed options: %s" % opts[0]
     seen = tab_through(page, evidence, "next-options-app", {app["id"]})
     evidence.note(ai=mode, options=[{k: o[k] for k in ("title", "tier", "nodes", "pct", "text")} for o in opts])
-    assert_ghost_matches(seen, skot.elements(), ["App"])
-    a = seen[0]["ghosts"]
-    assert any(x["from"] == app["id"] for x in a["arrows"]), "(a) must hang off App: %s" % a["arrows"]
+    assert_ghost_matches(seen, skot.elements(), ["App"], typed=True)
+    assert any(x["from"] == app["id"] for x in seen[1]["ghosts"]["arrows"]), "(b) must hang off App: %s" % seen[1]["ghosts"]["arrows"]
     assert_no_console_errors(evidence)
 
 
@@ -426,12 +432,13 @@ def test_next_options_blank(page, skot, evidence):
     opts = read_options(page)
     shot(page, evidence, "next-options-blank", "typed")
     assert_three_tiers(opts)
-    assert 2 <= opts[0]["nodes"] <= 3, "(a) should be a 2-3 node start: %s" % opts[0]
+    assert opts[0]["nodes"] == 1 and opts[0]["title"] == "URL Shortener", "(a) is the one typed node: %s" % opts[0]
+    assert 2 <= opts[1]["nodes"] <= 5, "(b) should be a small start: %s" % opts[1]
     assert opts[2]["nodes"] >= 7, "(c) should be the full HLD: %s" % opts[2]
     seen = tab_through(page, evidence, "next-options-blank", set())
     evidence.note(ai=mode, options=[{k: o[k] for k in ("title", "tier", "nodes", "pct", "text")} for o in opts])
     assert len(seen) == 3
-    assert_ghost_matches(seen, [], [])
+    assert_ghost_matches(seen, [], [], typed=True)
     while not read_options(page, 3)[1]["active"]:
         page.keyboard.press("Tab")
         page.wait_for_timeout(150)
@@ -523,10 +530,15 @@ def test_type_tab_enter(page, skot, evidence):
     shot(page, evidence, "type-tab-enter", "1-typed-ap")
     assert appeared_s < 1.0, "options took %.2fs after the second keystroke; the lexicon answer must be instant" % appeared_s
     page.keyboard.type("i")
+    page.wait_for_function("s => /^\\d?\\s*API\\b/.test(document.querySelector(s + ' button[aria-pressed]')?.innerText || '')",
+                           arg=SUGGESTIONS, timeout=3000)
     opts = read_options(page)
     shot(page, evidence, "type-tab-enter", "2-ranked")
-    assert len(opts) == 3 and opts[0]["title"] == "API Gateway", "options should already show API Gateway: %s" % opts
+    assert len(opts) == 3 and opts[0]["title"] == "API", "option 1 is what Enter adds, the typed name: %s" % opts
+    assert opts[1]["title"].startswith("API +") and opts[1]["nodes"] >= 2, "the bigger options build around the typed node: %s" % opts
     assert opts[0]["active"], "(a) should be highlighted: %s" % opts
+    legend = page.locator(SUGGESTIONS + " [data-key-legend]").inner_text().replace("\n", " ")
+    assert "add node" in legend and "complete to API Gateway" in legend, "the legend must say what Enter and Tab do: %r" % legend
     page.keyboard.press("Tab")
     page.wait_for_timeout(250)
     shot(page, evidence, "type-tab-enter", "3-tab")
@@ -539,9 +551,14 @@ def test_type_tab_enter(page, skot, evidence):
     gw = next(e for e in els if e.get("label") == "API Gateway")
     evidence.note(ai=mode, appeared_after_typing_s=appeared_s, shapes=labels(els))
     assert labels(els) == ["API Gateway", "Client Dashboard"], "exactly one new node: %s" % labels(els)
-    assert any(e.get("fromId") == cd["id"] and e.get("toId") == gw["id"] for e in els if e.get("kind") == "arrow"), \
-        "Client Dashboard -> API Gateway arrow missing"
+    assert not skot.arrows(), "the connection is offered, not drawn"
     assert bar.input_value() == "", "the bar should clear after drawing"
+    first = read_options(page)[0]
+    assert first["active"] and "Client Dashboard" in first["title"] and "API Gateway" in first["title"], first
+    page.keyboard.press("Enter")
+    els = skot.wait_state(lambda es: any(e.get("kind") == "arrow" for e in es), what="the second Enter to connect")
+    shot(page, evidence, "type-tab-enter", "5-enter-again")
+    assert [(a["fromId"], a["toId"]) for a in skot.arrows()] == [(cd["id"], gw["id"])], "Client Dashboard -> API Gateway arrow missing"
     assert_no_console_errors(evidence)
 
 

@@ -37,7 +37,7 @@ describe("pen stroke wiring", () => {
   });
 
   it("Enter applies through applyPredictionToElements (one implementation)", () => {
-    const apply = between(workspace, "const applyPrediction = useCallback", "pushEditDelta(");
+    const apply = between(workspace, "const applyAction = useCallback", "pushEditDelta(");
     expect(apply).toMatch(/updateElements\(\(prev\) => applyPredictionToElements\(prev, pred\)\)/);
     expect(workspace).not.toMatch(/const removeSet = new Set\(pred\.removeIds/);
   });

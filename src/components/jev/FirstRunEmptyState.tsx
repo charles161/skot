@@ -80,8 +80,8 @@ export function FirstRunEmptyState({
             {BRAND_TAGLINE.charAt(0).toUpperCase() + BRAND_TAGLINE.slice(1)}.
           </h1>
           <p className="mt-1.5 max-w-[460px] text-[13px] leading-relaxed text-muted-foreground sm:text-[14px]">
-            Pick a live studio flow below, draw directly on the sheet, or type a
-            system in the dock.
+            Type a name below and press Enter to add it. Or pick a flow, or draw
+            straight on the sheet.
           </p>
         </div>
 
@@ -145,30 +145,25 @@ export function FirstRunEmptyState({
           className="jev-reveal mt-5 flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 font-mono text-[11px] text-muted-foreground sm:mt-6"
           style={{ animationDelay: "240ms" }}
         >
-          <span className="inline-flex items-center gap-1.5">
-            <kbd className="rounded-md border border-border bg-card/90 px-1.5 py-0.5 text-[10px] font-semibold text-foreground shadow-2xs">
-              F
-            </kbd>
-            <span>Fork</span>
-          </span>
-          <span aria-hidden="true" className="opacity-35">
-            ·
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <kbd className="rounded-md border border-border bg-card/90 px-1.5 py-0.5 text-[10px] font-semibold text-foreground shadow-2xs">
-              Tab
-            </kbd>
-            <span>Cycle</span>
-          </span>
-          <span aria-hidden="true" className="opacity-35">
-            ·
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <kbd className="rounded-md border border-border bg-card/90 px-1.5 py-0.5 text-[10px] font-semibold text-foreground shadow-2xs">
-              Enter
-            </kbd>
-            <span>Accept</span>
-          </span>
+          {[
+            ["Enter", "Add what you typed"],
+            ["Tab", "Bigger options"],
+            ["/", "Commands"],
+          ].map(([key, what], i) => (
+            <React.Fragment key={key}>
+              {i > 0 && (
+                <span aria-hidden="true" className="opacity-35">
+                  ·
+                </span>
+              )}
+              <span className="inline-flex items-center gap-1.5">
+                <kbd className="rounded-md border border-border bg-card/90 px-1.5 py-0.5 text-[10px] font-semibold text-foreground shadow-2xs">
+                  {key}
+                </kbd>
+                <span>{what}</span>
+              </span>
+            </React.Fragment>
+          ))}
         </div>
       </div>
     </div>

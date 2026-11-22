@@ -91,10 +91,17 @@ function expectWellFormed(board: JevElement[], res: NextOptionsResult) {
   for (const o of res.options) {
     expect(o.nodeCount).toBe(shapesOf(o).length);
     expect(o.subtitle.trim().length).toBeGreaterThan(0);
-    expect(allAttached(board, o)).toBe(true);
-    if (boardShapes.length === 0) expect(singlePiece(o)).toBe(true);
     const shapes = shapesOf(o);
-    for (const s of shapes) expect(boardLabels.has(norm(s.label))).toBe(false);
+    // Core loop (22 Nov): for typed text, (a) is the one node Enter adds: no arrow, and it may repeat a name.
+    const typedNode = res.typed !== null && o === res.options[0];
+    if (typedNode) {
+      expect(o.addElements).toEqual([res.typed!.node]);
+    } else {
+      expect(allAttached(board, o)).toBe(true);
+      const own = res.typed ? shapes.filter((s) => s.id !== res.typed!.node.id) : shapes;
+      for (const s of own) expect(boardLabels.has(norm(s.label))).toBe(false);
+    }
+    if (boardShapes.length === 0) expect(singlePiece(o)).toBe(true);
     expect(new Set(shapes.map((s) => norm(s.label))).size).toBe(shapes.length);
     for (const ar of arrowsOf(o)) {
       const ends = [ar.fromId, ar.toId];
@@ -113,18 +120,17 @@ describe("S1: board = Client Dashboard, typed 'apigateway'", () => {
   const board = [dashboard];
   const res = buildNextOptions({ elements: board, text: "apigateway" })!;
 
-  it("offers three tiered options, all attached to Client Dashboard", () => {
+  it("offers three tiered options; the bigger two are attached to Client Dashboard", () => {
     expectWellFormed(board, res);
   });
 
-  it("(a) is one API Gateway node linked from Client Dashboard with a labelled arrow, right next to it", () => {
+  it("(a) is one API Gateway node right next to Client Dashboard, with no arrow: the link is offered after Enter", () => {
     const [a] = res.options;
     const [node] = shapesOf(a);
     expect(shapesOf(a)).toHaveLength(1);
     expect(node.label).toBe("API Gateway");
-    const [link] = arrowsOf(a);
-    expect(link.fromId).toBe("cd");
-    expect(link.toId).toBe(node.id);
+    expect(arrowsOf(a)).toHaveLength(0);
+    const link = arrowsOf(res.options[1]).find((ar) => ar.fromId === "cd" && ar.toId === node.id)!;
     expect(link.label.trim()).not.toBe("");
     expect(node.x).toBeGreaterThan(dashboard.x + dashboard.width);
     expect(node.x - (dashboard.x + dashboard.width)).toBeLessThan(260);
@@ -161,34 +167,36 @@ describe("S5 type-ahead: partial text predicts the component from context", () =
     expect(predictConcept(text, [dashboard], dashboard)?.label).toBe(label);
   });
 
-  it("'api' after Client Dashboard gives a single API Gateway linked Client Dashboard -> API Gateway as (a)", () => {
+  it("'api' after Client Dashboard: Enter adds a node named API, and Tab completes to API Gateway", () => {
     const res = buildNextOptions({ elements: [dashboard], text: "api" })!;
     expectWellFormed([dashboard], res);
     const [a] = res.options;
-    expect(shapesOf(a).map((s) => s.label)).toEqual(["API Gateway"]);
-    expect(arrowsOf(a)[0]).toMatchObject({ fromId: "cd", toId: shapesOf(a)[0].id });
+    expect(shapesOf(a).map((s) => s.label)).toEqual(["API"]);
+    expect(arrowsOf(a)).toHaveLength(0);
     expect(res.concept.completion).toBe("API Gateway");
   });
 
-  it("needs at least two characters", () => {
-    expect(buildNextOptions({ elements: [dashboard], text: "a" })).toBeNull();
+  it("one letter already shows the node Enter adds", () => {
+    const res = buildNextOptions({ elements: [dashboard], text: "a" })!;
+    expect(res.options.map((o) => o.title)).toEqual(["A"]);
   });
 
-  it("attaches to the selected node over the most recent one", () => {
+  it("goes beside the selected node over the most recent one", () => {
     const board = [dashboard, el({ id: "svc", label: "Order Service", x: 700, y: 160 })];
     const res = buildNextOptions({ elements: board, text: "postgres", selectedIds: ["svc"] })!;
-    expect(arrowsOf(res.options[0])[0].fromId).toBe("svc");
+    expect(res.typed!.anchorId).toBe("svc");
+    expect(arrowsOf(res.options[1]).some((ar) => ar.fromId === "svc")).toBe(true);
   });
 });
 
 describe("S2: blank board, typed 'url shortener'", () => {
   const res = buildNextOptions({ elements: [], text: "url shortener", viewportCenter: { x: 600, y: 400 } })!;
 
-  it("goes from a 2-3 node start to the full HLD, each one connected piece", () => {
+  it("goes from the one typed node to a small start to the full HLD, each one connected piece", () => {
     expectWellFormed([], res);
     const counts = res.options.map((o) => shapesOf(o).length);
-    expect(counts[0]).toBeGreaterThanOrEqual(2);
-    expect(counts[0]).toBeLessThanOrEqual(3);
+    expect(shapesOf(res.options[0]).map((s) => s.label)).toEqual(["URL Shortener"]);
+    expect(counts[1]).toBeGreaterThanOrEqual(2);
     expect(counts[2]).toBeGreaterThanOrEqual(7);
   });
 
@@ -267,14 +275,14 @@ describe("context first: reuse, never duplicate, never float", () => {
     expect(arrowsOf(res.options[2]).some((ar) => ar.toId === "pg")).toBe(true);
   });
 
-  it("links to a node that already exists instead of adding it again", () => {
+  it("a name the board already has: Enter adds another one; the bigger options reuse the one that is there", () => {
     const board = [dashboard, el({ id: "gw", label: "API Gateway", x: 600, y: 160 })];
     const res = buildNextOptions({ elements: board, text: "api gateway", selectedIds: ["cd"] })!;
     expect(res.options).toHaveLength(3);
-    const [a] = res.options;
-    expect(shapesOf(a)).toHaveLength(0);
-    expect(arrowsOf(a)[0]).toMatchObject({ fromId: "cd", toId: "gw" });
-    for (const o of res.options) expect(shapesOf(o).some((s) => s.label === "API Gateway")).toBe(false);
+    const [a, ...bigger] = res.options;
+    expect(shapesOf(a).map((s) => s.label)).toEqual(["API Gateway"]);
+    expect(arrowsOf(a)).toHaveLength(0);
+    for (const o of bigger) expect(shapesOf(o).some((s) => s.label === "API Gateway")).toBe(false);
   });
 
   it("an unknown word still gives three attached options", () => {
@@ -367,8 +375,8 @@ describe("LLM refinement for a multi-selection keeps the hub wired to both selec
   });
 
   it("sends the deterministic names as a baseline for the LLM", () => {
-    expect(res.request.baseline.cluster[0]).toBe("Order Service");
-    expect(res.request.baseline.full.length).toBeGreaterThan(1);
+    expect(res.request!.baseline.cluster[0]).toBe("Order Service");
+    expect(res.request!.baseline.full.length).toBeGreaterThan(1);
   });
 
   it("drops combined labels and keeps Order Service connected to Checkout and Inventory", () => {
@@ -385,10 +393,11 @@ describe("LLM refinement for a multi-selection keeps the hub wired to both selec
 describe("board App, typed 'api gateway'", () => {
   const board = [el({ id: "app", label: "App", x: 200, y: 200 })];
   const res = buildNextOptions({ elements: board, text: "api gateway" })!;
-  it("(a) is one API Gateway linked from App; every option attached, App never duplicated", () => {
+  it("(a) is one API Gateway beside App; the bigger options link it from App, App never duplicated", () => {
     expectWellFormed(board, res);
     expect(shapesOf(res.options[0]).map((s) => s.label)).toEqual(["API Gateway"]);
-    expect(arrowsOf(res.options[0])[0].fromId).toBe("app");
+    expect(res.typed!.anchorId).toBe("app");
+    expect(arrowsOf(res.options[1]).some((ar) => ar.fromId === "app" && ar.toId === res.typed!.node.id)).toBe(true);
   });
 });
 
@@ -516,25 +525,46 @@ describe("a link between two selected board nodes always survives", () => {
   });
 });
 
-// Re-judge, 21 Nov: on a blank board the LLM cluster dropped the Client that option (a) had.
+// Re-judge, 21 Nov: the LLM cluster dropped a node that option (a) had. Since the core loop (22 Nov) a typed
+// name's (a) is the one typed node, so the rule is checked where (a) still has several nodes: a typed flow.
 describe("bigger options contain the smaller one", () => {
   it("rejects an LLM cluster that leaves out a node of option (a)", () => {
-    const res = buildNextOptions({ elements: [], text: "url shortener", viewportCenter: { x: 600, y: 400 } })!;
+    const res = buildNextOptions({ elements: [], text: "client -> shortener api", viewportCenter: { x: 600, y: 400 } })!;
+    expect(shapesOf(res.options[0]).map((s) => s.label)).toEqual(["Client", "Shortener API"]);
     const refined = refineOptionsWithGraphs(res, [], {
       cluster: {
         nodes: [
-          { label: "Shortener API", kind: "node" },
           { label: "URL Store", kind: "database" },
           { label: "Redirect Cache", kind: "cache" },
           { label: "Key Generator", kind: "node" },
         ],
         edges: [
-          { from: "Shortener API", to: "URL Store" },
-          { from: "Shortener API", to: "Redirect Cache" },
-          { from: "Shortener API", to: "Key Generator" },
+          { from: "URL Store", to: "Redirect Cache" },
+          { from: "URL Store", to: "Key Generator" },
         ],
       },
     });
     expect(refined.options[1]).toBe(res.options[1]);
+  });
+
+  it("lets an LLM cluster for a typed system stand without the typed node (URL Shortener is not a node of its HLD)", () => {
+    const res = buildNextOptions({ elements: [], text: "url shortener", viewportCenter: { x: 600, y: 400 } })!;
+    const refined = refineOptionsWithGraphs(res, [], {
+      cluster: {
+        nodes: [
+          { label: "Client", kind: "actor" },
+          { label: "Shortener API", kind: "node" },
+          { label: "URL Store", kind: "database" },
+          { label: "Redirect Cache", kind: "cache" },
+        ],
+        edges: [
+          { from: "Client", to: "Shortener API" },
+          { from: "Shortener API", to: "URL Store" },
+          { from: "Shortener API", to: "Redirect Cache" },
+        ],
+      },
+    });
+    expect(refined.options[0]).toBe(res.options[0]);
+    expect(shapesOf(refined.options[1]).map((s) => s.label)).toContain("Shortener API");
   });
 });

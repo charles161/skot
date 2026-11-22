@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   IconApiCard,
   IconClass,
@@ -39,13 +39,21 @@ interface ThoughtBarProps {
   value: string;
   hasPredictions?: boolean;
   onChange: (val: string) => void;
-  /** Enter with text: a /command runs, anything else applies the highlighted option. */
+  /** Enter with text: a /command runs; a name adds that node; a flow or a picked bigger option is drawn. */
   onSubmit: (prompt: string) => void;
   onClear: () => void;
   /** Tab with text: complete the word first, then cycle the three options. */
   onTypedTab?: (reverse: boolean) => void;
   onEmptyTab?: (reverse?: boolean) => void;
   onEmptyEnter?: () => void;
+  /** Esc with an empty bar while suggestions are open: dismiss them and keep typing. */
+  onEmptyEscape?: () => void;
+  /** A starter chip was picked: draw that whole prompt at once. */
+  onSpark?: (prompt: string) => void;
+  /** Put the caret in the bar when the board opens (desktop only), so typing a name just works. */
+  focusOnOpen?: boolean;
+  /** What the button next to the text does: "Add" for a node, "Draw" for a flow or a bigger option. */
+  submitLabel?: string;
   onEmptyUndo?: () => void;
   onEmptyRedo?: () => void;
   /** Shown in the bar while it is empty (the Moves button). */
@@ -62,12 +70,20 @@ export function ThoughtBar({
   onTypedTab,
   onEmptyTab,
   onEmptyEnter,
+  onEmptyEscape,
+  onSpark,
+  focusOnOpen = false,
+  submitLabel = "Add",
   onEmptyUndo,
   onEmptyRedo,
   accessory,
 }: ThoughtBarProps) {
   const [focused, setFocused] = useState(false);
   const [commandIndex, setCommandIndex] = useState(0);
+  useEffect(() => {
+    // A touch screen would pop its keyboard over the board, so only a mouse / trackpad device gets the caret.
+    if (focusOnOpen && window.matchMedia("(pointer: fine)").matches) inputRef.current?.focus({ preventScroll: true });
+  }, [focusOnOpen, inputRef]);
   const isCommand = value.trimStart().startsWith("/");
   const commands: CommandItem[] = isCommand ? [...matchPaletteCommands(value), ...matchMoveCommands(value)] : [];
   const activeCommand = commands.length > 0 ? commands[Math.min(commandIndex, commands.length - 1)] : null;
@@ -135,6 +151,8 @@ export function ThoughtBar({
       e.preventDefault();
       if (hasText) {
         onClear();
+      } else if (hasPredictions && onEmptyEscape) {
+        onEmptyEscape();
       } else {
         inputRef.current?.blur();
       }
@@ -169,7 +187,8 @@ export function ThoughtBar({
               type="button"
               onMouseDown={(e) => {
                 e.preventDefault();
-                onChange(spark.prompt);
+                if (onSpark) onSpark(spark.prompt);
+                else onChange(spark.prompt);
               }}
               className="jev-glass inline-flex min-h-[36px] max-w-full items-center gap-1.5 rounded-full px-3 py-1 text-[11.5px] font-medium text-foreground/90 shadow-xs transition-all hover:border-[#D94E28]/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0"
             >
@@ -256,7 +275,7 @@ export function ThoughtBar({
           aria-autocomplete="list"
           aria-activedescendant={focused && activeCommand ? `thought-bar-command-${activeCommand.command}` : undefined}
           aria-label="Describe a component or diagram flow to draw"
-          placeholder='Type what comes next ("api", "redis"), a flow ("app -> api") or / for commands…'
+          placeholder="Name a node, press Enter. a -> b draws a flow."
           className="min-h-[36px] min-w-0 flex-1 bg-transparent text-[13.5px] text-foreground placeholder:text-muted-foreground/85 focus:outline-none sm:min-h-0"
         />
 
@@ -275,7 +294,7 @@ export function ThoughtBar({
               onClick={() => onSubmit(value.trim())}
               className="inline-flex min-h-[36px] items-center gap-1 rounded-xl bg-[#D94E28] px-3 py-1.5 text-xs font-semibold text-white shadow-xs transition-transform active:scale-95 hover:bg-[#C1411E] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-card sm:min-h-0"
             >
-              Draw
+              {submitLabel}
               <IconEnter className="h-3 w-3" aria-hidden="true" />
             </button>
           </div>
