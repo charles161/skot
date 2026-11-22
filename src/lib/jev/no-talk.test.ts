@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
-import { toolForShortcutKey } from "@/lib/jev/shortcuts";
+import { toolForShortcut } from "@/lib/jev/shortcuts";
 
 const ROOT = path.resolve(__dirname, "../../..");
 const SRC = path.join(ROOT, "src");
@@ -78,8 +78,8 @@ describe("Talk-to-Draw is removed (no talk/mic control, no V shortcut)", () => {
   });
 
   it("V is not a shortcut: the keymap ignores it and no handler compares a key with 'v'", () => {
-    expect(toolForShortcutKey("v")).toBeNull();
-    expect(toolForShortcutKey("V")).toBeNull();
+    expect(toolForShortcut({ key: "v", code: "KeyV", altKey: true, ctrlKey: false, metaKey: false })).toBeNull();
+    expect(toolForShortcut({ key: "V", code: "KeyV", altKey: false, ctrlKey: false, metaKey: false })).toBeNull();
     const hits: string[] = [];
     for (const f of sourceFiles(SRC)) {
       const text = readFileSync(f, "utf8");
@@ -107,7 +107,9 @@ describe("Talk-to-Draw is removed (no talk/mic control, no V shortcut)", () => {
 
   it("the tool keymap still covers every drawing tool", () => {
     expect(
-      ["s", "h", "r", "d", "o", "c", "a", "f", "p", "t"].map((k) => toolForShortcutKey(k))
+      ["S", "H", "R", "D", "O", "C", "A", "F", "P", "T"].map((k) =>
+        toolForShortcut({ key: k.toLowerCase(), code: `Key${k}`, altKey: true, ctrlKey: false, metaKey: false })
+      )
     ).toEqual(["select", "hand", "node", "diamond", "database", "ellipse", "arrow", "frame", "freedraw", "text"]);
   });
 });

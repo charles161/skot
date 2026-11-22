@@ -25,7 +25,7 @@ import { ALL_TONES } from "@/lib/jev/colors";
 import { duplicateElements } from "@/lib/jev/duplicate";
 import type { EditField } from "@/lib/jev/inline-edit";
 import { isShapeTool, shapeFromTool } from "@/lib/jev/shape-tools";
-import { type DockTool, TOOL_SHORTCUT_KEYS, toolForShortcutKey } from "@/lib/jev/shortcuts";
+import { altLetter, type DockTool, isTypedLetter, toolForShortcut, toolShortcutLabel } from "@/lib/jev/shortcuts";
 import {
   ZOOM_STEP_IN,
   ZOOM_STEP_OUT,
@@ -60,6 +60,7 @@ import {
   computeBounds,
   computeViewportEnsureVisible,
   computeViewportFit,
+  computeViewportKeepBoard,
   isShapeElement,
   makeSeed,
   Rect,
@@ -79,10 +80,10 @@ import { isFlowText, planTypedNode } from "@/lib/jev/core-loop";
 import {
   buildAfterCreateOptions,
   buildNextOptions,
+  bestContextOption,
+  placeContextOption,
   predictConcept,
-  refineOptionsWithGraphs,
   typingAnchor,
-  type NextOptionsAnswer,
   type NextOptionsResult,
 } from "@/lib/jev/next-options";
 import {
@@ -194,16 +195,16 @@ const TOOLS: Array<{
   key: string;
   icon: React.ReactNode;
 }> = [
-  { id: "select", label: "Select", key: TOOL_SHORTCUT_KEYS.select, icon: <IconSelect className="h-4 w-4" /> },
-  { id: "hand", label: "Pan Canvas", key: TOOL_SHORTCUT_KEYS.hand, icon: <IconHand className="h-4 w-4" /> },
-  { id: "node", label: "Box", key: TOOL_SHORTCUT_KEYS.node, icon: <IconBox className="h-4 w-4" /> },
-  { id: "diamond", label: "Decision", key: TOOL_SHORTCUT_KEYS.diamond, icon: <IconDiamond className="h-4 w-4" /> },
-  { id: "database", label: "Database", key: TOOL_SHORTCUT_KEYS.database, icon: <IconDatabase className="h-4 w-4" /> },
-  { id: "ellipse", label: "Actor", key: TOOL_SHORTCUT_KEYS.ellipse, icon: <IconActor className="h-4 w-4" /> },
-  { id: "arrow", label: "Smart Arrow", key: TOOL_SHORTCUT_KEYS.arrow, icon: <IconArrow className="h-4 w-4" /> },
-  { id: "frame", label: "Zone Frame", key: TOOL_SHORTCUT_KEYS.frame, icon: <IconFrame className="h-4 w-4" /> },
-  { id: "freedraw", label: "Ink Pen", key: TOOL_SHORTCUT_KEYS.freedraw, icon: <IconPen className="h-4 w-4" /> },
-  { id: "text", label: "Text Note", key: TOOL_SHORTCUT_KEYS.text, icon: <IconText className="h-4 w-4" /> },
+  { id: "select", label: "Select", key: toolShortcutLabel("select"), icon: <IconSelect className="h-4 w-4" /> },
+  { id: "hand", label: "Pan Canvas", key: toolShortcutLabel("hand"), icon: <IconHand className="h-4 w-4" /> },
+  { id: "node", label: "Box", key: toolShortcutLabel("node"), icon: <IconBox className="h-4 w-4" /> },
+  { id: "diamond", label: "Decision", key: toolShortcutLabel("diamond"), icon: <IconDiamond className="h-4 w-4" /> },
+  { id: "database", label: "Database", key: toolShortcutLabel("database"), icon: <IconDatabase className="h-4 w-4" /> },
+  { id: "ellipse", label: "Actor", key: toolShortcutLabel("ellipse"), icon: <IconActor className="h-4 w-4" /> },
+  { id: "arrow", label: "Smart Arrow", key: toolShortcutLabel("arrow"), icon: <IconArrow className="h-4 w-4" /> },
+  { id: "frame", label: "Zone Frame", key: toolShortcutLabel("frame"), icon: <IconFrame className="h-4 w-4" /> },
+  { id: "freedraw", label: "Ink Pen", key: toolShortcutLabel("freedraw"), icon: <IconPen className="h-4 w-4" /> },
+  { id: "text", label: "Text Note", key: toolShortcutLabel("text"), icon: <IconText className="h-4 w-4" /> },
 ];
 
 const PEER_NAMES = ["Maya", "Soren", "Nadia", "Kavi", "Elena", "Theo"];
@@ -391,8 +392,6 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   const typedTextRef = useRef("");
   /** The user pressed Tab / hovered since these options appeared: late LLM answers must not replace the option they chose. */
   const optionsTouchedRef = useRef(false);
-  const optionsAbortRef = useRef<AbortController | null>(null);
-  const optionAnswersRef = useRef(new Map<string, NextOptionsAnswer>());
   /** Last node the user added, applied or renamed: what typed options attach to when nothing is selected. */
   const lastTouchedIdRef = useRef<string | null>(null);
   /** Tab just accepted a completion: that is a choice of the one-node option, so keep (a) highlighted. */
@@ -480,17 +479,14 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
 
   // Ensure new diagrams, morphs, or ghosts stay cleanly inside HUD-safe viewport bounds
   const ensureElementsVisible = useCallback(
-    (targetEls: JevElement[], margins?: ViewportMargins) => {
+    (targetEls: JevElement[], margins?: ViewportMargins, opts: { keepBoard?: boolean } = {}) => {
       const bounds = computeBounds(targetEls);
       if (!bounds || typeof window === "undefined") return;
-      const screenWidth = window.innerWidth;
-      const screenHeight = window.innerHeight;
+      const fit = { screenWidth: window.innerWidth, screenHeight: window.innerHeight, margins };
+      // keepBoard: a growing diagram zooms out to stay whole instead of scrolling its first nodes away.
+      const board = opts.keepBoard ? computeBounds(elementsRef.current) : null;
       setViewport((prev) =>
-        computeViewportEnsureVisible(prev, bounds, {
-          screenWidth,
-          screenHeight,
-          margins,
-        })
+        opts.keepBoard ? computeViewportKeepBoard(prev, bounds, board, fit) : computeViewportEnsureVisible(prev, bounds, fit)
       );
     },
     []
@@ -525,7 +521,10 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         onRanked?: (top: PredictedAction[]) => void;
         /** False keeps the pool as is: no LLM-proposed nodes are mixed in (pen-stroke conversions). */
         mergeContext?: boolean;
-        /** jev's probabilities are written onto the options already on screen; their order and the highlight stay. */
+        /**
+         * The options on screen keep their order and the highlight: jev's scores are written onto them, and the
+         * node the context route named from the board takes a slot the user is not on.
+         */
         keepOrder?: boolean;
       } = {}
     ) => {
@@ -598,9 +597,17 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
           isJevModelSource(data.source) && data.isHeuristic !== true;
         const probs = isLiveModel ? data.nextActionProbabilities ?? null : null;
         if (opts.keepOrder) {
-          setPredictions((prev) =>
-            prev.map((p) => (probs && typeof probs[p.id] === "number" ? { ...p, probability: probs[p.id] } : p))
-          );
+          const subject = nextIntent.subjectId ? currentEls.find((e) => e.id === nextIntent.subjectId) : undefined;
+          const named =
+            subject && opts.mergeContext !== false
+              ? bestContextOption(data.contextSuggestions ?? [], probs, subject, currentEls, pool)
+              : null;
+          setPredictions((prev) => {
+            // The panel moved on (the user typed, or picked something): this answer is for options no longer shown.
+            if (prev.length !== pool.length || prev.some((p, i) => p.id !== pool[i].id)) return prev;
+            const scored = prev.map((p) => (probs && typeof probs[p.id] === "number" ? { ...p, probability: probs[p.id] } : p));
+            return named ? placeContextOption(scored, activePredIdxRef.current, named) : scored;
+          });
           setTelemetry({
             source: isLiveModel ? data.source : "heuristic",
             model: data.model,
@@ -1041,15 +1048,15 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   }, [viewportCenterWorld, viewportWorld]);
 
   /**
-   * Shows the options at once (all local, instant), then asks the server to rank them with jev and reshape
-   * (b) and (c) with the Gateway LLM. The highlight only moves when the user moves it: jev's pick is shown
-   * as a percentage, and a late answer never replaces the option being previewed after the user pressed Tab.
+   * Shows the options at once (all local, instant). While the user is typing nothing is asked of the AI
+   * (`ask: false`). After a node is added, applied or clicked there is one call: the context route names a
+   * next node from the board and jev scores the options. The highlight only moves when the user moves it.
    */
   const presentNextOptions = useCallback(
     (
       result: NextOptionsResult,
       els: JevElement[],
-      opts: { signal?: AbortSignal; debounceMs?: number; keepMinimal?: boolean } = {}
+      opts: { signal?: AbortSignal; keepMinimal?: boolean; ask?: boolean } = {}
     ) => {
       if (aiQuietRef.current) return;
       setIntent(result.intent);
@@ -1057,77 +1064,12 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       setActivePredIdx(0);
       optionsTouchedRef.current = Boolean(opts.keepMinimal);
       recordSuggestionShown(getBrowserStorage(), result.options.flatMap((o) => o.feedbackKeys ?? []));
-
       decideAbortRef.current?.abort();
-      optionsAbortRef.current?.abort();
-      const controller = new AbortController();
-      optionsAbortRef.current = controller;
-      opts.signal?.addEventListener("abort", () => controller.abort(), { once: true });
-      const request = result.request;
-      if (!request) {
-        setTelemetry(null);
-        return;
-      }
-
-      const apply = (answer: NextOptionsAnswer) => {
-        if (controller.signal.aborted) return;
-        const refined = answer.graphs ? refineOptionsWithGraphs(result, els, answer.graphs) : result;
-        const live = isJevModelSource(answer.source) && answer.isHeuristic !== true && answer.probabilities;
-        const ranked = refined.options.map((o) => ({
-          ...o,
-          probability: live && o.tier ? answer.probabilities?.[o.tier] : undefined,
-        }));
-        setPredictions((prev) => {
-          if (prev[0]?.id !== result.options[0].id) return prev;
-          if (!optionsTouchedRef.current) return ranked;
-          return ranked.map((o, i) => (i === activePredIdxRef.current ? { ...prev[i], probability: o.probability } : o));
-        });
-        if (result === typedResultRef.current) typedResultRef.current = refined;
-        setTelemetry({
-          source: live ? answer.source : "heuristic",
-          model: live ? answer.model : answer.graphs ? answer.graphModel ?? "gateway" : "lexicon",
-          isHeuristic: !live,
-          latencyMs: answer.latencyMs,
-          evaluating: false,
-        });
-      };
-
-      const key = JSON.stringify([
-        request.trigger,
-        request.conceptLabel,
-        request.anchorLabel ?? "",
-        request.selectedLabels,
-        request.boardLabels,
-      ]);
-      const cached = optionAnswersRef.current.get(key);
-      if (cached) {
-        apply(cached);
-        return;
-      }
-      setTelemetry({ source: "heuristic", model: "lexicon", isHeuristic: true, latencyMs: 0, evaluating: true });
-      const timer = window.setTimeout(async () => {
-        try {
-          const res = await postDecide(
-            { mode: "next_options", ...request },
-            { aiQuiet: aiQuietRef.current, signal: controller.signal }
-          );
-          if (!res || !res.ok || controller.signal.aborted) {
-            setTelemetry((prev) => (prev ? { ...prev, evaluating: false } : null));
-            return;
-          }
-          const answer = (await res.json()) as NextOptionsAnswer;
-          optionAnswersRef.current.set(key, answer);
-          if (optionAnswersRef.current.size > 64) {
-            optionAnswersRef.current.delete(optionAnswersRef.current.keys().next().value as string);
-          }
-          apply(answer);
-        } catch {
-          if (!controller.signal.aborted) setTelemetry((prev) => (prev ? { ...prev, evaluating: false } : null));
-        }
-      }, opts.debounceMs ?? 0);
-      controller.signal.addEventListener("abort", () => window.clearTimeout(timer), { once: true });
+      setTelemetry(null);
+      if (opts.ask === false) return;
+      void rankWithTypeSafeJev(result.intent, els, result.options, { keepOrder: true, signal: opts.signal });
     },
-    []
+    [rankWithTypeSafeJev]
   );
 
   /** What Tab completes the typed text to; the same concept the options are built from. */
@@ -1147,7 +1089,6 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         typedModeRef.current = false;
         typedResultRef.current = null;
         typedTextRef.current = "";
-        optionsAbortRef.current?.abort();
         setPredictions([]);
         setIntent(null);
       }
@@ -1165,7 +1106,6 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       if (typedModeRef.current) {
         typedResultRef.current = null;
         typedTextRef.current = "";
-        optionsAbortRef.current?.abort();
         setPredictions([]);
         setIntent(null);
       }
@@ -1176,7 +1116,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     typedTextRef.current = text;
     const keepMinimal = completedRef.current;
     completedRef.current = false;
-    presentNextOptions(result, elementsRef.current, { debounceMs: 150, keepMinimal });
+    presentNextOptions(result, elementsRef.current, { keepMinimal, ask: false });
   }, [thoughtPrompt, elements, userSelectedIds, forkSession, aiQuiet, presentNextOptions]);
 
   const updateElements = useCallback(
@@ -1348,7 +1288,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
 
   /**
    * After a node is added: its connections to the board are offered first (never applied on their own), then
-   * the usual next steps. The order is the board's; jev only writes its percentages onto it.
+   * the usual next steps. The order is the board's; jev only marks its pick.
    */
   const presentAfterCreate = useCallback(
     (nodeId: string, anchorIds: string[], els: JevElement[]) => {
@@ -1360,19 +1300,33 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         setIntent(null);
         return;
       }
-      if (result.request) {
-        presentNextOptions(result, els);
-        return;
-      }
-      optionsAbortRef.current?.abort();
-      optionsTouchedRef.current = false;
-      setIntent(result.intent);
-      setPredictions(result.options);
-      setActivePredIdx(0);
-      setTelemetry(null);
-      void rankWithTypeSafeJev(result.intent, els, result.options, { mergeContext: false, keepOrder: true });
+      presentNextOptions(result, els);
     },
-    [presentNextOptions, rankWithTypeSafeJev]
+    [presentNextOptions]
+  );
+
+  /** Text in the Thought Bar ends a Fork It preview: the user has moved on to naming a node. */
+  const changeThought = useCallback(
+    (val: string) => {
+      if (forkSession && val.trim()) {
+        forkAbortRef.current?.abort();
+        setForkSession(null);
+      }
+      setThoughtPrompt(val);
+    },
+    [forkSession]
+  );
+
+  /** A letter typed on the board: append it to the Thought Bar and put the caret there, after the text. */
+  const typeIntoThoughtBar = useCallback(
+    (letter: string) => {
+      const input = thoughtInputRef.current;
+      const next = (input?.value ?? "") + letter;
+      changeThought(next);
+      input?.focus({ preventScroll: true });
+      window.requestAnimationFrame(() => input?.setSelectionRange(next.length, next.length));
+    },
+    [changeThought]
   );
 
   /** The node the app just added or extended becomes the selection, without counting as the user's own pick. */
@@ -1388,7 +1342,6 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       recordSuggestionRejected(getBrowserStorage(), active.feedbackKeys);
     }
     decideAbortRef.current?.abort();
-    optionsAbortRef.current?.abort();
     setPredictions([]);
     setIntent(null);
     selectionTriggerRef.current?.dismiss();
@@ -1440,7 +1393,6 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       if (!res || aiQuietRef.current) return;
       // The stroke's own reading (connect, shape, lasso) is the order: the feedback profile must not reshuffle it.
       decideAbortRef.current?.abort();
-      optionsAbortRef.current?.abort();
       setIntent(res.intent);
       setPredictions(selectTopSuggestions(res.pool));
       setActivePredIdx(0);
@@ -1490,7 +1442,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         : undefined;
       const placed = pred.addElements.filter((e) => e.kind !== "arrow");
       if (placed.length > 0) {
-        ensureElementsVisible(placed, { top: 104, right: 64, bottom: 255, left: 64 });
+        ensureElementsVisible(placed, { top: 104, right: 64, bottom: 255, left: 64 }, { keepBoard: true });
       }
       if (!nextFocus) {
         setPredictions([]);
@@ -1555,7 +1507,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       typedResultRef.current = null;
       typedTextRef.current = "";
       setThoughtPrompt("");
-      ensureElementsVisible([node], { top: 104, right: 64, bottom: 255, left: 64 });
+      ensureElementsVisible([node], { top: 104, right: 64, bottom: 255, left: 64 }, { keepBoard: true });
       focusNode(node.id);
       announceStatus(`Added ${node.label}`);
       presentAfterCreate(node.id, plan.anchorIds, next);
@@ -2471,6 +2423,30 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         return;
       }
 
+      // A letter typed anywhere on the board is the start of a node name: it goes to the Thought Bar, and
+      // the node will land beside whatever is selected. (Tools are on Alt+letter.)
+      if (!aiQuiet && isTypedLetter(e) && !document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) {
+        e.preventDefault();
+        typeIntoThoughtBar(e.key);
+        return;
+      }
+
+      // Alt+letter: Fork It for a selection (Alt+F), otherwise the dock tool with that letter
+      if (altLetter(e) === "F" && selectedIds.length > 0 && !aiQuiet) {
+        const selSet = new Set(selectedIds);
+        if (elementsRef.current.some((el) => selSet.has(el.id) && isShapeElement(el))) {
+          e.preventDefault();
+          startForkSelection();
+          return;
+        }
+      }
+      const shortcutTool = toolForShortcut(e);
+      if (shortcutTool) {
+        e.preventDefault();
+        setTool(shortcutTool);
+        return;
+      }
+
       // Fork pressure step: 1-5 pick a pressure, Enter skips to the classic takes, Esc cancels
       if (forkSession?.phase === "pressure") {
         if (e.key === "Escape") {
@@ -2558,26 +2534,6 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         if (selectedIds.length === 1) {
           e.preventDefault();
           startInlineEditRef.current?.(selectedIds[0]);
-          return;
-        }
-      }
-
-      // F with one or more shapes selected triggers Fork It! (When nothing is selected, F selects Zone Frame tool.)
-      if (
-        !e.metaKey &&
-        !e.ctrlKey &&
-        !e.altKey &&
-        e.key.toLowerCase() === "f" &&
-        selectedIds.length > 0 &&
-        !aiQuiet
-      ) {
-        const selSet = new Set(selectedIds);
-        const hasForkable = elementsRef.current.some(
-          (el) => selSet.has(el.id) && isShapeElement(el)
-        );
-        if (hasForkable) {
-          e.preventDefault();
-          startForkSelection();
           return;
         }
       }
@@ -2701,19 +2657,12 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         handleDeleteIds(selectedIds);
         return;
       }
-
-      // Single-letter tool shortcuts
-      if (!e.metaKey && !e.ctrlKey && !e.altKey) {
-        const shortcutTool = toolForShortcutKey(e.key);
-        if (shortcutTool) {
-          setTool(shortcutTool);
-        }
-      }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
+    typeIntoThoughtBar,
     forkSession,
     applyForkTake,
     cancelForkSession,
@@ -2823,7 +2772,6 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     if (!prompt) return;
     aiQuietRef.current = true;
     decideAbortRef.current?.abort();
-    optionsAbortRef.current?.abort();
     morphAbortRef.current?.abort();
     setMorphEvaluating(false);
     selectionTriggerRef.current?.dismiss();
@@ -2989,12 +2937,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     }
 
     const rafId = window.requestAnimationFrame(() => {
-      ensureElementsVisible(contextEls, {
-        top: 100,
-        right: 64,
-        bottom: 255,
-        left: 64,
-      });
+      ensureElementsVisible(contextEls, { top: 100, right: 64, bottom: 255, left: 64 }, { keepBoard: true });
     });
     return () => window.cancelAnimationFrame(rafId);
   }, [
@@ -3083,6 +3026,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
           onForkArchitecture={handleStarterForkArchitecture}
           onPractice={() => setPracticePickerOpen(true)}
           onStarterBoard={loadStarterBoard}
+          onDescribe={drawPromptNow}
         />
       )}
 
@@ -3232,12 +3176,6 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
                     }
                   >
                     <span aria-hidden="true">{t.icon}</span>
-                    <span
-                      aria-hidden="true"
-                      className="pointer-events-none absolute bottom-0.5 right-1 font-mono text-[8.5px] opacity-75"
-                    >
-                      {t.key}
-                    </span>
                   </TooltipTrigger>
                   <TooltipContent side="bottom" className="text-xs">
                     {t.label} <span className="ml-1 font-mono opacity-75">{t.key}</span>
@@ -3494,13 +3432,13 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
           <button
             type="button"
             onClick={() => startForkSelection()}
-            title="Generate 3 architectural takes (F)"
+            title="Generate 3 architectural takes (Alt+F)"
             className="inline-flex min-h-[36px] items-center gap-1 rounded-lg bg-[#D94E28]/12 px-2.5 py-1 text-[11.5px] font-semibold text-[#C2411D] transition-colors hover:bg-[#D94E28] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-[#FF8562] dark:hover:text-white sm:min-h-0 sm:px-2"
           >
             <IconFork className="h-3.5 w-3.5" aria-hidden="true" />
             <span>Fork it</span>
             <kbd className="ml-0.5 hidden rounded border border-current/25 px-1 font-mono text-[9px] sm:inline">
-              F
+              Alt F
             </kbd>
           </button>
           )}
@@ -3597,23 +3535,13 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
           inputRef={thoughtInputRef}
           value={thoughtPrompt}
           hasPredictions={Boolean(forkSession) || predictions.length > 0}
-          onChange={(val) => {
-            if (forkSession && val.trim()) {
-              forkAbortRef.current?.abort();
-              setForkSession(null);
-            }
-            setThoughtPrompt(val);
-          }}
+          onChange={changeThought}
           accessory={<MovesMenu onRun={(move) => moves.run(move)} quiet={aiQuiet} />}
           onSubmit={(prompt) => {
             if (packs.runPaletteCommand(prompt) || moves.runCommand(prompt)) setThoughtPrompt("");
             else submitThought(prompt);
           }}
           onClear={() => setThoughtPrompt("")}
-          onSpark={(prompt) => {
-            setThoughtPrompt("");
-            drawPromptNow(prompt);
-          }}
           submitLabel={isFlowText(thoughtPrompt) || activePredIdx > 0 ? "Draw" : "Add"}
           focusOnOpen={Boolean(roomId) && !joiningSharedRoom}
           onEmptyEscape={dismissPredictions}

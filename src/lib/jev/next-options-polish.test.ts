@@ -1,7 +1,8 @@
 // Final judge round, 21 Nov: blank-board cluster read right to left; S3 had two edges meaning "reserves stock";
 // follow-ups drifted off topic (WebRTC Peer, generic Auth); the full template was identical for every anchor.
 import { describe, expect, it } from "vitest";
-import { buildNextOptions, refineOptionsWithGraphs, structureProblems } from "@/lib/jev/next-options";
+import { structureProblems } from "@/lib/jev/__fixtures__/structure-problems";
+import { buildNextOptions } from "@/lib/jev/next-options";
 import type { JevElement, PredictedAction } from "@/lib/jev/types";
 
 const el = (o: Partial<JevElement> & { id: string; label: string }): JevElement => ({
@@ -12,23 +13,8 @@ const arrows = (o: PredictedAction) => o.addElements.filter((e) => e.kind === "a
 
 describe("blank board: the flow reads left to right", () => {
   const res = buildNextOptions({ elements: [], text: "url shortener", viewportCenter: { x: 600, y: 400 } })!;
-  const refined = refineOptionsWithGraphs(res, [], {
-    cluster: {
-      nodes: [
-        { label: "Shortener API", kind: "node" },
-        { label: "Client", kind: "actor" },
-        { label: "URL Store", kind: "database" },
-        { label: "Redirect Cache", kind: "cache" },
-      ],
-      edges: [
-        { from: "Client", to: "Shortener API", label: "shorten / redirect" },
-        { from: "Shortener API", to: "URL Store" },
-        { from: "Shortener API", to: "Redirect Cache" },
-      ],
-    },
-  });
   // Option (a) is the one typed node ("URL Shortener"); the flow is in the two bigger options.
-  for (const o of [...res.options.slice(1), ...refined.options.slice(1)]) {
+  for (const o of res.options.slice(1)) {
     it(`${o.tier} (${o.source}): Client sits left of Shortener API`, () => {
       const client = shapes(o).find((s) => s.label === "Client")!;
       const api = shapes(o).find((s) => s.label === "Shortener API")!;
@@ -53,32 +39,6 @@ describe("S3: one meaning per edge, everything fed", () => {
   });
   it("every new node in the full option has an incoming edge", () => {
     expect(structureProblems(res.options[2], board).filter((p) => p.includes("no input"))).toEqual([]);
-  });
-  it("an LLM answer with an unfed node or a direct re-link of the selection is not used", () => {
-    const refined = refineOptionsWithGraphs(res, board, {
-      full: {
-        nodes: [
-          { label: "Order Service", kind: "node" },
-          { label: "Orders DB", kind: "database" },
-          { label: "Event Bus", kind: "queue" },
-          { label: "Worker", kind: "node" },
-          { label: "Payment Service", kind: "node" },
-          { label: "Audit DB", kind: "database" },
-        ],
-        edges: [
-          { from: "Checkout", to: "Order Service" },
-          { from: "Order Service", to: "Inventory", label: "reserves stock" },
-          { from: "Checkout", to: "Inventory", label: "reserves stock" },
-          { from: "Order Service", to: "Orders DB" },
-          { from: "Order Service", to: "Event Bus" },
-          { from: "Worker", to: "Audit DB" },
-          { from: "Order Service", to: "Payment Service" },
-        ],
-      },
-    });
-    const full = refined.options[2];
-    expect(arrows(full).some((a) => [a.fromId, a.toId].sort().join() === ["co", "inv"].sort().join())).toBe(false);
-    expect(structureProblems(full, board).filter((p) => p.includes("no input"))).toEqual([]);
   });
 });
 

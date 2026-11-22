@@ -9,14 +9,12 @@ import {
   IconEntity,
   IconEstimate,
   IconSequence,
-  IconSpark,
   IconStateMachine,
   IconWand,
   type IconComponent,
 } from "@/brand/icons";
 import { matchPaletteCommands, parsePaletteInput, type PaletteCommand } from "@/lib/jev/notation-packs";
 import { matchMoveCommands, parseMoveCommand, type MoveId } from "@/lib/jev/sd-moves/moves";
-import { PROMPT_SPARKS } from "@/lib/jev/templates";
 import { MOVE_ICONS } from "./MovesMenu";
 
 const COMMAND_ICONS: Record<PaletteCommand | MoveId, IconComponent> = {
@@ -48,8 +46,6 @@ interface ThoughtBarProps {
   onEmptyEnter?: () => void;
   /** Esc with an empty bar while suggestions are open: dismiss them and keep typing. */
   onEmptyEscape?: () => void;
-  /** A starter chip was picked: draw that whole prompt at once. */
-  onSpark?: (prompt: string) => void;
   /** Put the caret in the bar when the board opens (desktop only), so typing a name just works. */
   focusOnOpen?: boolean;
   /** What the button next to the text does: "Add" for a node, "Draw" for a flow or a bigger option. */
@@ -71,7 +67,6 @@ export function ThoughtBar({
   onEmptyTab,
   onEmptyEnter,
   onEmptyEscape,
-  onSpark,
   focusOnOpen = false,
   submitLabel = "Add",
   onEmptyUndo,
@@ -180,27 +175,6 @@ export function ThoughtBar({
 
   return (
     <div className="pointer-events-auto flex w-full max-w-[min(660px,100vw)] flex-col items-center gap-2 px-3">
-      {/* Quick starter sparks when focused, empty, and no prediction strip is already open */}
-      {focused && !value.trim() && !hasPredictions && (
-        <div className="flex max-w-full flex-wrap items-center justify-center gap-1.5">
-          {PROMPT_SPARKS.map((spark) => (
-            <button
-              key={spark.label}
-              type="button"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                if (onSpark) onSpark(spark.prompt);
-                else onChange(spark.prompt);
-              }}
-              className="jev-glass inline-flex min-h-[36px] max-w-full items-center gap-1.5 rounded-full px-3 py-1 text-[11.5px] font-medium text-foreground/90 shadow-xs transition-all hover:border-[#D94E28]/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0"
-            >
-              <IconSpark className="h-3 w-3 shrink-0 text-[#C2411D] dark:text-[#FF8562]" aria-hidden="true" />
-              <span className="truncate">{spark.label}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
       {focused && isCommand && (
         <div
           role="listbox"
@@ -303,9 +277,10 @@ export function ThoughtBar({
         ) : (
           <div className="flex shrink-0 items-center gap-1.5">
             {accessory}
-            <kbd className="hidden rounded-md border border-border bg-secondary px-1.5 py-0.5 font-mono text-[11px] font-medium text-muted-foreground sm:inline-block">
-              /
-            </kbd>
+            <span className="hidden items-center gap-1 font-mono text-[10.5px] text-muted-foreground sm:inline-flex">
+              <kbd className="rounded-md border border-border bg-secondary px-1.5 py-0.5 text-[11px] font-medium">/</kbd>
+              commands
+            </span>
           </div>
         )}
       </div>

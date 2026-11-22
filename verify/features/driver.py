@@ -1,5 +1,7 @@
 """Hands and eyes for Skot: drives the real UI the way a person does (keys, clicks, typing).
 
+Tools are picked with Alt+letter: a bare letter typed on the board goes to the Thought Bar (22 Nov 2026).
+
 Vendored from the agent driver /home/clover_mj/tools/skot-bot/skot_bot.py (its Daemon class), minus the
 socket daemon: the feature suite owns one Playwright page per check. Page evaluation only reads state
 (the board the app persists in localStorage, the canvas transform); every change goes through the UI.
@@ -11,11 +13,11 @@ VIEWPORT = {"width": 1600, "height": 1000}
 SAFE = {"left": 70, "top": 120, "right": 1530, "bottom": 600}
 
 SHAPES = {
-    "box": {"kind": "node", "key": "r", "w": 172, "h": 72},
-    "decision": {"kind": "diamond", "key": "d", "w": 148, "h": 96},
-    "database": {"kind": "database", "key": "o", "w": 156, "h": 86},
-    "actor": {"kind": "ellipse", "key": "c", "w": 152, "h": 74},
-    "text": {"kind": "text", "key": "t", "w": 180, "h": 42},
+    "box": {"kind": "node", "key": "Alt+r", "w": 172, "h": 72},
+    "decision": {"kind": "diamond", "key": "Alt+d", "w": 148, "h": 96},
+    "database": {"kind": "database", "key": "Alt+o", "w": 156, "h": 86},
+    "actor": {"kind": "ellipse", "key": "Alt+c", "w": 152, "h": 74},
+    "text": {"kind": "text", "key": "Alt+t", "w": 180, "h": 42},
 }
 STARTERS = {"checkout": "Draw a checkout system", "sequence": "Morph to sequence",
             "fork": "Fork my architecture"}
@@ -128,10 +130,16 @@ class Driver:
         self.page.wait_for_function("() => location.hash.includes('room=')", timeout=30000)
         self.page.wait_for_timeout(500)
         if starter:
+            self.open_examples()
             self.page.get_by_role("button", name=STARTERS[starter]).click()
             self.wait_state(lambda els: any(is_shape(e) for e in els), timeout=20, what="the starter to load")
             self.settle()
         return self.room_id()
+
+    def open_examples(self):
+        """The first screen is the bar and one Examples button; starters and starter boards are behind it."""
+        self.page.get_by_role("region", name="Start sketching on Skot").get_by_role("button", name="Examples", exact=True).click()
+        self.page.get_by_role("button", name="Close examples").wait_for(state="visible", timeout=5000)
 
     def settle(self, ms=1200):
         self.page.wait_for_timeout(ms)
@@ -216,7 +224,7 @@ class Driver:
         self.clear()
         v = self.viewport()
         s1, s2 = self.to_screen(*center(f), v), self.to_screen(*center(t), v)
-        self.page.keyboard.press("a")
+        self.page.keyboard.press("Alt+a")
         self.page.mouse.move(*s1)
         self.page.mouse.down()
         self.page.mouse.move((s1[0] + s2[0]) / 2, (s1[1] + s2[1]) / 2, steps=6)
@@ -248,7 +256,7 @@ class Driver:
     def stroke(self, points_world, steps=4):
         """Ink pen (P) stroke through world points, like a person dragging the mouse."""
         self.clear()
-        self.page.keyboard.press("p")
+        self.page.keyboard.press("Alt+p")
         v = self.viewport()
         pts = [self.to_screen(x, y, v) for x, y in points_world]
         self.page.mouse.move(*pts[0])

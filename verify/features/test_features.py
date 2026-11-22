@@ -154,6 +154,7 @@ def test_starter_boards(page, skot, evidence):
             page.get_by_role("button", name="Board menu").click()
             page.get_by_role("menuitem", name=title, exact=True).click()
         else:
+            skot.open_examples()
             page.get_by_role("button", name="Starter board: " + title).click()
         els = skot.wait_state(lambda es: any(e["id"] == bid + "_requirements" for e in es), timeout=15,
                               what="the %s starter board" % bid)
@@ -416,7 +417,7 @@ def test_next_options_app(page, skot, evidence):
     shot(page, evidence, "next-options-app", "typed")
     assert_three_tiers(opts)
     assert opts[0]["nodes"] == 1 and opts[0]["title"] == "API Gateway", "(a) must be one API Gateway node: %s" % opts[0]
-    assert "jev" in (opts[0]["pct"] or "") or mode == "real", "jev must rank the typed options: %s" % opts[0]
+    assert not any(o["pct"] for o in opts), "nothing is asked of the AI while typing (5A): %s" % opts
     seen = tab_through(page, evidence, "next-options-app", {app["id"]})
     evidence.note(ai=mode, options=[{k: o[k] for k in ("title", "tier", "nodes", "pct", "text")} for o in opts])
     assert_ghost_matches(seen, skot.elements(), ["App"], typed=True)
@@ -729,7 +730,7 @@ def fork_reuses_existing_nodes(page, skot, evidence):
     seen = []
     for take in (1, 2, 3):
         skot.select("API service")
-        skot.press("f")
+        skot.press("Alt+f")
         step = page.locator(FORK_PRESSURE)
         step.wait_for(state="visible", timeout=20000)
         step.get_by_role("button", name="Skip: classic takes").click()
@@ -1405,6 +1406,7 @@ def test_practice_mode(page, skot, evidence):
     page.on("request", on_request)
 
     skot.new_board()
+    skot.open_examples()
     page.get_by_role("button", name=re.compile("^Practice a problem")).click()
     page.get_by_role("dialog").get_by_role("button", name=re.compile("^URL shortener")).click()
     page.get_by_role("dialog").wait_for(state="detached", timeout=5000)
@@ -1421,7 +1423,7 @@ def test_practice_mode(page, skot, evidence):
     skot.add("database", "Links DB", skot.to_world(900, 420))
     skot.connect("Redirect API", "Links DB")
     skot.select("Redirect API", "Links DB")
-    skot.press("f")
+    skot.press("Alt+f")
     skot.settle(2500)
     multi_bar = page.locator(MULTI_BAR)
     surfaces = {

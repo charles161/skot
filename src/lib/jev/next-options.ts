@@ -31,6 +31,7 @@ import {
   placedWhere,
   planTypedNode,
   sizeFor,
+  slotBeside,
   typedNodeLabel,
   typedNodeOption,
   type TypedNodePlan,
@@ -40,18 +41,19 @@ import { isComponentShape } from "./notation-kinds";
 import { arrowHitsShape, labelRect, rectsIntersect } from "./ghost-geometry";
 import { layeredGhostLayout } from "./ghost-layout";
 import {
+  contextSuggestionSchema,
   GENERIC_SUGGESTION_LABELS,
   groupNextNode,
   inferNextStepsForLabel,
   orientPair,
   relationVerb,
   suggestionContextFor,
+  type ContextSuggestion,
   type SemanticSuggestion,
 } from "./prediction-engine";
 import { buildLocalSemanticGraphFromPrompt, cleanSemanticLabel } from "./semantic-graph";
 import {
   OPTION_TIERS,
-  type DecideSource,
   type JevElement,
   type OptionSource,
   type OptionTier,
@@ -1164,48 +1166,14 @@ export interface NextOptionsInput {
   viewport?: Rect;
 }
 
-/** What the server needs to rank the options with jev and reshape (b) and (c) with the Gateway LLM. */
-export interface NextOptionsRequest {
-  trigger: "type" | "select" | "multi";
-  text?: string;
-  conceptLabel: string;
-  anchorLabel?: string;
-  selectedLabels: string[];
-  boardLabels: string[];
-  options: Array<{ id: OptionTier; title: string; description: string; nodes: number }>;
-  /** The deterministic (b) and (c) node names: the LLM adapts these instead of starting from nothing. */
-  baseline: { cluster: string[]; full: string[]; edges: string[] };
-}
-
 export interface NextOptionsResult {
   intent: SpatialIntent;
   options: PredictedAction[];
   concept: PredictedConcept;
   anchorId: string | null;
-  /** Null when there is nothing for the server to rank (fewer than three options). */
-  request: NextOptionsRequest | null;
   /** The node Enter creates for the typed text (option (a)); null for a flow, a selection or a follow-up. */
   typed: TypedNodePlan | null;
-  /** Inputs to rebuild (b) and (c) in place when the LLM answers. */
-  context: {
-    anchorId: string | null;
-    viewportCenter: Point;
-    conceptKey: string | null;
-    conceptLabel: string;
-    selectedIds: string[];
-  };
 }
-
-/** "API -> Redis Cache (read-through)": the full option's wiring, so the LLM keeps a sound structure. */
-function edgeLines(o: PredictedAction, elements: JevElement[]): string[] {
-  const label = (id?: string) => (elements.find((e) => e.id === id) ?? o.addElements.find((e) => e.id === id))?.label ?? "";
-  return o.addElements
-    .filter((e) => e.kind === "arrow")
-    .map((a) => `${label(a.fromId)} -> ${label(a.toId)}${a.label ? ` (${a.label})` : ""}`.slice(0, 120));
-}
-
-const shapeLabels = (o: PredictedAction) =>
-  o.addElements.filter((e) => e.kind !== "arrow").map((e) => e.label.slice(0, 80));
 
 /** The node typed text attaches to: what Tab completion and the options both use. */
 export function typingAnchor(elements: JevElement[], text: string, selectedIds: string[], subjectId?: string | null): JevElement | null {
@@ -1337,13 +1305,6 @@ export function buildNextOptions(input: NextOptionsInput): NextOptionsResult | n
   const selected = (input.selectedIds ?? []).map((id) => shapes.find((s) => s.id === id)).filter((x): x is JevElement => Boolean(x));
   const predicted = text ? predictConcept(text, elements, anchor) : null;
   const conceptLabel = typed?.title ?? predicted?.label ?? (selected.length >= 2 ? selected.map((s) => s.label).join(" + ") : anchor?.label ?? "");
-  const context = {
-    anchorId: anchor?.id ?? null,
-    viewportCenter,
-    conceptKey: concept?.type === "component" ? concept.comp.key : null,
-    conceptLabel,
-    selectedIds: input.selectedIds ?? [],
-  };
   const typedIntent: SpatialIntent | null = typed && plan
     ? {
         kind: "prompt_follow_up",
@@ -1358,13 +1319,12 @@ export function buildNextOptions(input: NextOptionsInput): NextOptionsResult | n
   if (!options) {
     // Nothing bigger to offer (a one-letter name, an unknown word with no next steps): Enter still adds the node.
     if (!typed || !typedIntent) return null;
-    return { intent: typedIntent, options: [typed], concept: { label: typed.title }, anchorId: plan?.anchorId ?? null, request: null, typed: plan, context };
+    return { intent: typedIntent, options: [typed], concept: { label: typed.title }, anchorId: plan?.anchorId ?? null, typed: plan };
   }
 
-  const trigger: NextOptionsRequest["trigger"] = text ? "type" : selected.length >= 2 ? "multi" : "select";
   const intent: SpatialIntent =
     typedIntent ??
-    (trigger === "type"
+    (text
       ? {
           kind: "prompt_follow_up",
           headline: `Enter draws ${options[0].title}`,
@@ -1373,7 +1333,7 @@ export function buildNextOptions(input: NextOptionsInput): NextOptionsResult | n
           relatedIds: [],
           timestamp: Date.now(),
         }
-      : trigger === "multi"
+      : selected.length >= 2
         ? {
             kind: "domain_continue",
             headline: `Predictions for ${selected.length} selected nodes`,
@@ -1396,27 +1356,7 @@ export function buildNextOptions(input: NextOptionsInput): NextOptionsResult | n
     options,
     concept: predicted ? { ...predicted, label: conceptLabel } : { label: conceptLabel },
     anchorId: anchor?.id ?? null,
-    request: {
-      trigger,
-      ...(text ? { text: text.slice(0, 120) } : {}),
-      conceptLabel: conceptLabel.slice(0, 80) || "board",
-      ...(anchor ? { anchorLabel: anchor.label.slice(0, 80) } : {}),
-      selectedLabels: selected.map((s) => s.label.slice(0, 80)).slice(0, 8),
-      boardLabels: shapes.map((s) => s.label.trim().slice(0, 80)).filter(Boolean).slice(0, 40),
-      options: options.map((o) => ({
-        id: o.tier!,
-        title: o.title.slice(0, 120) || "option",
-        description: o.subtitle.slice(0, 140),
-        nodes: o.nodeCount ?? 0,
-      })),
-      baseline: {
-        cluster: shapeLabels(options[1]).slice(0, 12),
-        full: shapeLabels(options[2]).slice(0, 16),
-        edges: edgeLines(options[2], elements).slice(0, 20),
-      },
-    },
     typed: plan,
-    context,
   };
 }
 
@@ -1436,7 +1376,6 @@ export function buildAfterCreateOptions(input: {
   // The links are already offered above: a next step that is only another link would say the same thing twice.
   const steps = (next?.options ?? []).filter((o) => o.addElements.some((e) => e.kind !== "arrow"));
   const node = input.elements.find((e) => e.id === input.nodeId)!;
-  const viewportCenter = input.viewportCenter ?? { x: 400, y: 300 };
   return {
     intent: {
       kind: "domain_continue",
@@ -1449,133 +1388,8 @@ export function buildAfterCreateOptions(input: {
     options: [...links, ...steps].slice(0, 3),
     concept: { label: node.label },
     anchorId: node.id,
-    request: null,
     typed: null,
-    context: { anchorId: node.id, viewportCenter, conceptKey: null, conceptLabel: node.label, selectedIds: [] },
   };
-}
-
-// ------------------------------------------------------------------ LLM refinement
-
-/** The server's answer to `next_options`: jev's ranking of the three tiers and the LLM's (b)/(c) graphs. */
-export interface NextOptionsAnswer {
-  source: DecideSource;
-  model: string;
-  isHeuristic?: boolean;
-  latencyMs: number;
-  probabilities: Partial<Record<OptionTier, number>> | null;
-  graphs: { cluster?: LlmOptionGraph | null; full?: LlmOptionGraph | null } | null;
-  graphModel?: string;
-}
-
-export interface LlmOptionGraph {
-  nodes: Array<{ label: string; kind: string; sublabel?: string }>;
-  edges: Array<{ from: string; to: string; label?: string }>;
-}
-
-const LLM_KINDS = new Set<ShapeKind>(["node", "database", "cache", "queue", "lb", "blob", "external", "actor", "diamond"]);
-
-function llmDraft(
-  tier: OptionTier,
-  graph: LlmOptionGraph,
-  base: PredictedAction,
-  elements: JevElement[],
-  dropLabel: string | null
-): Draft {
-  const key = (label: string) => `llm_${norm(label)}`;
-  const nodes: DraftNode[] = [];
-  for (const n of graph.nodes) {
-    const label = n.label.trim().slice(0, 40);
-    if (!label || label.includes("+") || nodes.some((x) => x.key === key(label))) continue;
-    if (dropLabel && norm(label) === norm(dropLabel)) continue;
-    nodes.push({
-      key: key(label),
-      label,
-      ...(n.sublabel ? { sublabel: n.sublabel.trim().slice(0, 48) } : {}),
-      kind: LLM_KINDS.has(n.kind as ShapeKind) ? (n.kind as ShapeKind) : kindForLabel(label),
-    });
-  }
-  const boardByLabel = new Map(elements.filter(isBoardShape).map((e) => [norm(e.label), e.id]));
-  const endpoint = (label: string) =>
-    nodes.some((n) => n.key === key(label)) ? key(label) : boardByLabel.has(norm(label)) ? existingKey(boardByLabel.get(norm(label))!) : null;
-  const edges: DraftEdge[] = [];
-  for (const e of graph.edges) {
-    const from = endpoint(e.from);
-    const to = endpoint(e.to);
-    // The LLM extends the board; it never rewires two nodes the user already has.
-    if (from && to && !(from.startsWith("#") && to.startsWith("#"))) edges.push({ from, to, label: e.label?.trim().slice(0, 24) });
-  }
-
-  // The deterministic option's main node stays where it is, wired the same way, and the LLM graph hangs
-  // off it: Tab between options does not make the ghost jump, and the option stays attached to the board.
-  const baseIds = new Set(base.addElements.map((e) => e.id));
-  const concept = base.addElements.find((e) => e.kind !== "arrow");
-  const wiring = concept
-    ? base.addElements.filter(
-        (e) =>
-          e.kind === "arrow" &&
-          ((e.fromId === concept.id && !baseIds.has(e.toId!)) || (e.toId === concept.id && !baseIds.has(e.fromId!)))
-      )
-    : [];
-  if (concept && wiring.length > 0) {
-    const conceptKey = key(concept.label);
-    const at = nodes.findIndex((n) => n.key === conceptKey);
-    if (at >= 0) nodes.splice(at, 1);
-    nodes.unshift({ key: conceptKey, label: concept.label, sublabel: concept.sublabel, kind: concept.kind as ShapeKind });
-    for (const w of wiring.reverse()) {
-      edges.unshift(
-        w.fromId === concept.id
-          ? { from: conceptKey, to: existingKey(w.toId!), label: w.label }
-          : { from: existingKey(w.fromId!), to: conceptKey, label: w.label }
-      );
-    }
-    const touched = new Set(edges.flatMap((e) => [e.from, e.to]));
-    for (const n of nodes) if (n.key !== conceptKey && !touched.has(n.key)) edges.push({ from: conceptKey, to: n.key });
-    return { tier, nodes, edges, source: "llm", name: `${concept.label} build-out`, focusKey: conceptKey };
-  }
-  return { tier, nodes, edges, source: "llm", name: nodes[0]?.label ?? "architecture", focusKey: nodes[0]?.key };
-}
-
-const isStoreEl = (e: JevElement) => e.kind === "database" || e.kind === "blob";
-const isCacheEl = (e: JevElement) => e.kind === "cache" || /cache|redis|memcache/i.test(e.label);
-const isReplicaEl = (e: JevElement) => /replica/i.test(e.label);
-
-/**
- * Architecture mistakes an option must not make: a cache hung off the database instead of sitting on the
- * caller's read path, or a replica writing into the primary.
- */
-export function structureProblems(option: PredictedAction, elements: JevElement[]): string[] {
-  const all = new Map([...elements, ...option.addElements].map((e) => [e.id, e]));
-  const arrows = [...elements, ...option.addElements].filter((e) => e.kind === "arrow" && e.fromId && e.toId);
-  const problems: string[] = [];
-  for (const a of option.addElements.filter((e) => e.kind === "arrow")) {
-    const from = all.get(a.fromId!);
-    const to = all.get(a.toId!);
-    if (!from || !to) continue;
-    if (isStoreEl(from) && !isCacheEl(from) && isCacheEl(to)) problems.push(`${from.label} feeds cache ${to.label}`);
-    if (isReplicaEl(from) && isStoreEl(to) && !isReplicaEl(to)) problems.push(`replica ${from.label} writes into ${to.label}`);
-  }
-  const fresh = option.addElements.filter((e) => e.kind !== "arrow");
-  const unfed = fresh.filter((n) => n.kind !== "actor" && !arrows.some((a) => a.toId === n.id));
-  const blank = !elements.some((e) => e.kind !== "arrow" && e.kind !== "freedraw");
-  for (const n of blank ? unfed.slice(1) : unfed) problems.push(`${n.label} has no input`);
-  for (const cache of option.addElements.filter((e) => e.kind !== "arrow" && isCacheEl(e))) {
-    const neighbours = arrows
-      .filter((a) => a.fromId === cache.id || a.toId === cache.id)
-      .map((a) => all.get(a.fromId === cache.id ? a.toId! : a.fromId!))
-      .filter((x): x is JevElement => Boolean(x));
-    if (neighbours.length > 0 && neighbours.every((n) => isStoreEl(n) || isCacheEl(n))) {
-      problems.push(`cache ${cache.label} has no caller, only stores`);
-    }
-  }
-  return problems;
-}
-
-/** A bigger option holds every node of the smaller one, so Tab only ever adds to the picture. */
-/** The bigger option builds on the smaller one: each of its nodes is in the bigger option or already on the board. */
-function containsNodesOf(bigger: PredictedAction, smaller: PredictedAction, elements: JevElement[]): boolean {
-  const have = [...bigger.addElements, ...elements].filter((e) => e.kind !== "arrow");
-  return smaller.addElements.filter((e) => e.kind !== "arrow").every((e) => have.some((h) => sameThing(h, e)));
 }
 
 /** The same two nodes get the same edge label in every option: the first option that names the edge wins. */
@@ -1601,57 +1415,59 @@ function harmonizeEdgeLabels(options: PredictedAction[], elements: JevElement[])
   });
 }
 
-/** Swaps the Gateway LLM's names and structure into (b) and (c) when they keep the small-to-big order. */
-export function refineOptionsWithGraphs(
-  result: NextOptionsResult,
+// ------------------------------------------------------------------ the node the AI names from the board
+
+/**
+ * The context route reads the board and names next nodes for the subject. The one jev scores highest (the
+ * first when there is no score) becomes an option: that node beside the subject, linked from it. Names that
+ * are generic or already on the board or in the options are skipped.
+ */
+export function bestContextOption(
+  suggestions: ContextSuggestion[],
+  scores: Record<string, number> | null,
+  subject: JevElement,
   elements: JevElement[],
-  graphs: { cluster?: LlmOptionGraph | null; full?: LlmOptionGraph | null }
-): NextOptionsResult {
-  const request = result.request;
-  if (!request || result.options.length < 3) return result;
-  const anchor = result.context.anchorId ? elements.find((e) => e.id === result.context.anchorId) ?? null : null;
-  const ctx: Context = {
-    elements,
-    anchor,
-    viewportCenter: result.context.viewportCenter,
-    selectedIds: result.context.selectedIds,
-  };
-  const [a, b, c] = result.options;
-  const size = (o: PredictedAction) => o.nodeCount ?? 0;
-  // The typed node (a) is its own thing, not the seed of (b): the LLM options build around it when they hold the
-  // same component, and need not contain it otherwise ("URL Shortener" is not a node of its own HLD).
-  const pinnedCtx = result.typed ? pinTypedNode(ctx, result.typed.node) : null;
-  const builds = (candidate: PredictedAction) => Boolean(result.typed) || containsNodesOf(candidate, a, elements);
-  const shape = (draft: Draft) => {
-    const m = materializeAround(draft, ctx, pinnedCtx);
-    const candidate = toOption(draft, m, m.pinned && pinnedCtx ? pinnedCtx : ctx);
-    const sound =
-      structureProblems({ ...candidate, addElements: [...candidate.addElements, ...m.dropped] }, elements).length === 0 &&
-      builds(candidate);
-    return { candidate, sound };
-  };
-  let nextB = b;
-  let nextC = c;
-  const dropLabel = request.trigger === "type" && !result.context.conceptKey ? result.context.conceptLabel : null;
-  if (graphs.cluster && graphs.cluster.nodes.length > 0) {
-    const { candidate, sound } = shape(llmDraft("cluster", graphs.cluster, b, elements, dropLabel));
-    if (sound && size(candidate) > size(a) && size(candidate) <= 5 && size(candidate) >= size(b) - 1) nextB = candidate;
-  }
-  if (graphs.full && graphs.full.nodes.length > 0) {
-    const { candidate, sound } = shape({ ...llmDraft("full", graphs.full, b, elements, dropLabel), title: c.title });
-    if (sound && size(candidate) > size(nextB) && size(candidate) >= Math.max(5, size(c) - 3)) nextC = candidate;
-  }
-  if (nextC === c && size(c) <= size(nextB)) nextB = b;
-  const options = harmonizeEdgeLabels([a, nextB, nextC], elements);
+  options: PredictedAction[]
+): PredictedAction | null {
+  const taken = [...elements, ...options.flatMap((o) => o.addElements)].filter((e) => e.kind !== "arrow");
+  const valid = suggestions
+    .map((raw) => contextSuggestionSchema.safeParse(raw))
+    .flatMap((parsed) => (parsed.success ? [parsed.data] : []))
+    .filter((s) => !GENERIC_SUGGESTION_LABELS.has(s.label) && !taken.some((e) => norm(e.label) === norm(s.label)));
+  if (valid.length === 0) return null;
+  const score = (id: string) => scores?.[id] ?? 0;
+  const best = valid.reduce((top, s) => (score(s.id) > score(top.id) ? s : top), valid[0]);
+  const kind: ShapeKind = best.kind;
+  const node = makeShape(kind, best.label, best.sublabel, slotBeside(subject, sizeFor(kind), elements));
+  const edge = best.edgeLabel?.trim() || relationVerb(subject, node);
   return {
-    ...result,
-    options,
-    request: {
-      ...request,
-      options: options.map((o) => ({ id: o.tier!, title: o.title.slice(0, 120), description: o.subtitle.slice(0, 140), nodes: o.nodeCount ?? 0 })),
-      baseline: { ...request.baseline, edges: edgeLines(options[2], elements).slice(0, 20) },
-    },
+    id: best.id,
+    title: best.label,
+    subtitle: `${subject.label || subject.kind} — ${edge} → ${best.label}`,
+    category: "extend",
+    nodeCount: 1,
+    source: "llm",
+    feedbackKeys: ["cat:context"],
+    ...(typeof scores?.[best.id] === "number" ? { probability: scores[best.id] } : {}),
+    addElements: [node, makeLink(subject.id, node.id, edge)],
+    focusId: node.id,
   };
+}
+
+/**
+ * Where the board-named node goes among the three options. Never on the highlighted one, so what Enter does
+ * is the same before and after the AI answers. It takes the place of a one-node step when there is one, else
+ * of the cluster, else of the last option.
+ */
+export function placeContextOption(options: PredictedAction[], activeIndex: number, named: PredictedAction): PredictedAction[] {
+  if (options.length < 3) return [...options, named];
+  const free = options.map((_, i) => i).filter((i) => i !== activeIndex);
+  const adds = (o: PredictedAction) => o.addElements.filter((e) => e.kind !== "arrow").length;
+  const target =
+    free.find((i) => adds(options[i]) === 1) ??
+    free.find((i) => options[i].tier === "cluster") ??
+    free[free.length - 1];
+  return options.map((o, i) => (i === target ? named : o));
 }
 
 export { OPTION_TIERS };

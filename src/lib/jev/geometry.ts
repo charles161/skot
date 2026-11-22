@@ -444,3 +444,32 @@ export function computeViewportEnsureVisible(
     maxZoom: Math.min(opts.maxZoom ?? 1.1, viewport.zoom),
   });
 }
+
+/** The whole board stays readable down to this zoom; past it the view follows the newest node instead. */
+export const WHOLE_BOARD_MIN_ZOOM = 0.5;
+
+/**
+ * Keeps `target` in view the gentle way. Nothing moves while it is already visible. When it is not, the view
+ * zooms out to show the whole board, as long as that stays readable (never zooming in, never under
+ * `WHOLE_BOARD_MIN_ZOOM`), so earlier nodes do not scroll away as a diagram grows. Only a board too big
+ * for that pans to the target.
+ */
+export function computeViewportKeepBoard(
+  viewport: Viewport,
+  target: Rect,
+  board: Rect | null,
+  opts: ViewportFitOptions
+): Viewport {
+  const toTarget = computeViewportEnsureVisible(viewport, target, opts);
+  if (toTarget === viewport || !board) return toTarget;
+  const x = Math.min(board.x, target.x);
+  const y = Math.min(board.y, target.y);
+  const all: Rect = {
+    x,
+    y,
+    width: Math.max(board.x + board.width, target.x + target.width) - x,
+    height: Math.max(board.y + board.height, target.y + target.height) - y,
+  };
+  const whole = computeViewportFit(all, { ...opts, minZoom: 0.01, maxZoom: Math.min(opts.maxZoom ?? 1.1, viewport.zoom) });
+  return whole.zoom >= WHOLE_BOARD_MIN_ZOOM ? whole : toTarget;
+}

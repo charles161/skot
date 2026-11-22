@@ -187,19 +187,19 @@ def test_first_screen(page, skot, evidence):
     buttons = [b.inner_text().strip() for b in start.get_by_role("button").all()]
     assert buttons == ["Examples"], "the first screen is the bar plus one Examples button, found %s" % buttons
     for hidden in ("Draw a checkout system", "Fork my architecture", "Practice a problem", "Starter board: Chat"):
-        assert page.get_by_role("button", name=re.compile("^" + hidden)).count() == 0, "%r should be behind Examples" % hidden
+        assert page.get_by_role("button", name=re.compile(hidden)).count() == 0, "%r should be behind Examples" % hidden
     assert page.get_by_text("WebRTC Whiteboard").count() == 0, "no prompt chips on the first screen"
     words = len(start.inner_text().split())
     assert words <= 40, "the first screen should say very little, it says %d words" % words
 
     examples.click()
-    page.get_by_role("button", name=re.compile("^Draw a checkout system")).wait_for(state="visible", timeout=3000)
+    page.get_by_role("button", name=re.compile("Draw a checkout system")).wait_for(state="visible", timeout=3000)
     shot(page, evidence, "first-screen", "2-examples")
     for shown in ("Morph to sequence", "Fork my architecture", "Practice a problem", "Starter board: URL shortener", "Starter board: Notifications"):
-        assert page.get_by_role("button", name=re.compile("^" + shown)).is_visible(), "%r missing from Examples" % shown
+        assert page.get_by_role("button", name=re.compile(shown)).is_visible(), "%r missing from Examples" % shown
     page.keyboard.press("Escape")
     page.wait_for_timeout(300)
-    assert page.get_by_role("button", name=re.compile("^Draw a checkout system")).count() == 0, "Esc should close Examples"
+    assert page.get_by_role("button", name=re.compile("Draw a checkout system")).count() == 0, "Esc should close Examples"
     assert examples.is_visible()
 
     # Typing still wins: the first screen never gets in the way of the core loop.

@@ -156,8 +156,11 @@ interface Anchor {
   side: "right" | "left";
   /** Every selected node, when the anchor is a multi-selection. */
   group?: string[];
-  /** The anchor is a node with the same name: the copy goes straight under it. */
-  twin?: boolean;
+  /**
+   * The new node goes straight under the anchor first: a copy under its twin, and every node on a view too
+   * narrow for two columns (a phone), where a row would run off the screen.
+   */
+  stack?: boolean;
 }
 
 interface Slot {
@@ -190,7 +193,7 @@ function freeSlotBeside(anchor: Anchor, size: { width: number; height: number },
   const own = a.x + (a.width - size.width) / 2;
   const far = sideX(anchor.side, 2);
   const back = sideX(other, 1);
-  const first: Array<[x: number, rows: number[], adjacent?: boolean]> = anchor.twin
+  const first: Array<[x: number, rows: number[], adjacent?: boolean]> = anchor.stack
     ? [
         [own, [1, -1], true],
         [flow, [0], true],
@@ -222,6 +225,12 @@ function freeSlotBeside(anchor: Anchor, size: { width: number; height: number },
   // A crowded corner: past everything on the board, level with the anchor. Free by construction.
   const right = Math.max(...obstacles.map((o) => o.x + o.width));
   return { at: at(right + H_GAP, 0), adjacent: false };
+}
+
+/** The closest free slot beside a board node, for a node of `size` that hangs off it. */
+export function slotBeside(anchor: JevElement, size: { width: number; height: number }, elements: JevElement[]): Point {
+  const rect: Rect = { x: anchor.x, y: anchor.y, width: anchor.width, height: anchor.height };
+  return freeSlotBeside({ id: anchor.id, rect, side: "right" }, size, elements).at;
 }
 
 function freeSpotAround(center: Point, size: { width: number; height: number }, elements: JevElement[]): Point {
@@ -284,7 +293,7 @@ function pickAnchor(input: TypedNodeInput, label: string, kind: ShapeKind): Anch
   const twins = visible.filter((s) => norm(s.label) === norm(label));
   if (twins.length > 0) {
     const twin = twins[twins.length - 1];
-    return { id: twin.id, rect: rectOf(twin), side: "right", twin: true };
+    return { id: twin.id, rect: rectOf(twin), side: "right", stack: true };
   }
   const focused = input.lastFocusedId ? visible.find((s) => s.id === input.lastFocusedId) ?? null : null;
   const near = focused ? getElementCenter(focused) : input.viewportCenter;
@@ -317,6 +326,17 @@ function pickAnchor(input: TypedNodeInput, label: string, kind: ShapeKind): Anch
   return fallback ? { id: fallback.id, rect: rectOf(fallback), side: "right" } : null;
 }
 
+/**
+ * On a phone-sized view (under three columns wide) a row soon runs off the screen and takes the earlier nodes
+ * with it. There, when the slot on the anchor's flow side would not be fully in view, the node goes under it.
+ */
+function runsOffNarrowView(anchor: Anchor, size: { width: number; height: number }, viewport?: Rect): boolean {
+  const column = size.width + H_GAP;
+  if (!viewport || viewport.width >= 3 * column) return false;
+  const a = anchor.rect;
+  return anchor.side === "right" ? a.x + a.width + column > viewport.x + viewport.width : a.x - column < viewport.x;
+}
+
 /** What Enter creates for the typed text: one node, named as typed, in the best free space. Null only for empty text. */
 export function planTypedNode(input: TypedNodeInput): TypedNodePlan | null {
   const label = typedNodeLabel(input.text);
@@ -324,7 +344,8 @@ export function planTypedNode(input: TypedNodeInput): TypedNodePlan | null {
   const kind = typedNodeKind(label);
   const size = sizeFor(kind);
   const named = CATALOG.find((c) => norm(c.label) === norm(label));
-  const anchor = pickAnchor(input, label, kind);
+  const picked = pickAnchor(input, label, kind);
+  const anchor = picked && runsOffNarrowView(picked, size, input.viewport) ? { ...picked, stack: true } : picked;
   const slot = anchor
     ? freeSlotBeside(anchor, size, input.elements)
     : { at: freeSpotAround(input.viewportCenter, size, input.elements), adjacent: false };

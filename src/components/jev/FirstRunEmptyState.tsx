@@ -1,8 +1,9 @@
 "use client";
 
 import { BRAND_NAME, BRAND_TAGLINE } from "@/brand/brand";
-import React from "react";
-import { IconArrowRight, IconFork, IconLayers, IconTarget, IconWand } from "@/brand/icons";
+import React, { useEffect, useState } from "react";
+import { IconArrowRight, IconClose, IconFork, IconLayers, IconSpark, IconTarget, IconWand } from "@/brand/icons";
+import { PROMPT_SPARKS } from "@/lib/jev/templates";
 import { StarterBoardsRow } from "./StarterBoardsPicker";
 
 interface FirstRunEmptyStateProps {
@@ -11,6 +12,8 @@ interface FirstRunEmptyStateProps {
   onForkArchitecture: () => void;
   onPractice: () => void;
   onStarterBoard: (id: string) => void;
+  /** A described diagram ("Microservices with API gateway, auth…") is drawn at once. */
+  onDescribe: (prompt: string) => void;
 }
 
 export function FirstRunEmptyState({
@@ -19,7 +22,19 @@ export function FirstRunEmptyState({
   onForkArchitecture,
   onPractice,
   onStarterBoard,
+  onDescribe,
 }: FirstRunEmptyStateProps) {
+  // The first screen is the bar and this one button (Charles, 22 Nov 2026). Everything else is behind it.
+  const [examplesOpen, setExamplesOpen] = useState(false);
+  useEffect(() => {
+    if (!examplesOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setExamplesOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [examplesOpen]);
+
   const starters = [
     {
       id: "checkout",
@@ -80,9 +95,32 @@ export function FirstRunEmptyState({
             {BRAND_TAGLINE.charAt(0).toUpperCase() + BRAND_TAGLINE.slice(1)}.
           </h1>
           <p className="mt-1.5 max-w-[460px] text-[13px] leading-relaxed text-muted-foreground sm:text-[14px]">
-            Type a name below and press Enter to add it. Or pick a flow, or draw
-            straight on the sheet.
+            Type a name and press Enter.
           </p>
+          {!examplesOpen && (
+            <button
+              type="button"
+              onClick={() => setExamplesOpen(true)}
+              className="jev-glass mt-4 inline-flex min-h-[40px] items-center gap-1.5 rounded-full px-4 py-1.5 text-[12.5px] font-semibold text-foreground shadow-xs transition-colors hover:border-[#D94E28]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <IconSpark className="h-3.5 w-3.5 text-[#C2411D] dark:text-[#FF8562]" aria-hidden="true" />
+              Examples
+            </button>
+          )}
+        </div>
+
+        {examplesOpen && (
+        <>
+        <div className="mb-2 flex w-full items-center justify-between">
+          <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Examples</span>
+          <button
+            type="button"
+            aria-label="Close examples"
+            onClick={() => setExamplesOpen(false)}
+            className="flex min-h-[36px] min-w-[36px] items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <IconClose className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
         </div>
 
         <div className="grid w-full grid-cols-1 gap-2.5 sm:grid-cols-3 sm:gap-3.5">
@@ -140,31 +178,22 @@ export function FirstRunEmptyState({
         </button>
         <StarterBoardsRow onPick={onStarterBoard} />
 
-        {/* Subtle keyboard hint row */}
-        <div
-          className="jev-reveal mt-5 flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 font-mono text-[11px] text-muted-foreground sm:mt-6"
-          style={{ animationDelay: "240ms" }}
-        >
-          {[
-            ["Enter", "Add what you typed"],
-            ["Tab", "Bigger options"],
-            ["/", "Commands"],
-          ].map(([key, what], i) => (
-            <React.Fragment key={key}>
-              {i > 0 && (
-                <span aria-hidden="true" className="opacity-35">
-                  ·
-                </span>
-              )}
-              <span className="inline-flex items-center gap-1.5">
-                <kbd className="rounded-md border border-border bg-card/90 px-1.5 py-0.5 text-[10px] font-semibold text-foreground shadow-2xs">
-                  {key}
-                </kbd>
-                <span>{what}</span>
-              </span>
-            </React.Fragment>
+        <div className="mt-3 flex max-w-full flex-wrap items-center justify-center gap-1.5">
+          {PROMPT_SPARKS.map((spark) => (
+            <button
+              key={spark.label}
+              type="button"
+              aria-label={`Draw: ${spark.label}`}
+              onClick={() => onDescribe(spark.prompt)}
+              className="jev-glass inline-flex min-h-[36px] max-w-full items-center gap-1.5 rounded-full px-3 py-1 text-[11.5px] font-medium text-foreground/90 shadow-xs transition-all hover:border-[#D94E28]/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0"
+            >
+              <IconSpark className="h-3 w-3 shrink-0 text-[#C2411D] dark:text-[#FF8562]" aria-hidden="true" />
+              <span className="truncate">{spark.label}</span>
+            </button>
           ))}
         </div>
+        </>
+        )}
       </div>
     </div>
   );

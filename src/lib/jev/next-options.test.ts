@@ -1,13 +1,7 @@
 // Charles (21 Nov 2026): "I need next-action predictions. Even if it gives me an entire diagram, it should be
 // 1 out of 3 options." Every AI action offers exactly three options, small to big, attached to the board.
 import { describe, expect, it } from "vitest";
-import {
-  buildNextOptions,
-  predictConcept,
-  refineOptionsWithGraphs,
-  structureProblems,
-  type NextOptionsResult,
-} from "@/lib/jev/next-options";
+import { buildNextOptions, predictConcept, type NextOptionsResult } from "@/lib/jev/next-options";
 import type { JevElement, PredictedAction } from "@/lib/jev/types";
 
 const el = (o: Partial<JevElement> & { id: string; label: string }): JevElement => ({
@@ -306,89 +300,6 @@ describe("context first: reuse, never duplicate, never float", () => {
   });
 });
 
-describe("LLM structures refine (b) and (c) but stay attached and deduplicated", () => {
-  const board = [dashboard];
-  const res = buildNextOptions({ elements: board, text: "apigateway" })!;
-  const refined = refineOptionsWithGraphs(res, board, {
-    cluster: {
-      nodes: [
-        { label: "API Gateway", kind: "lb" },
-        { label: "Client Dashboard", kind: "actor" },
-        { label: "Session Service", kind: "node" },
-        { label: "Dashboard BFF", kind: "node" },
-      ],
-      edges: [
-        { from: "Client Dashboard", to: "API Gateway", label: "HTTPS" },
-        { from: "API Gateway", to: "Session Service", label: "verify" },
-        { from: "API Gateway", to: "Dashboard BFF", label: "routes" },
-      ],
-    },
-    full: {
-      nodes: [
-        { label: "Metrics Service", kind: "node" },
-        { label: "Metrics DB", kind: "database" },
-        { label: "Alert Queue", kind: "queue" },
-        { label: "Alert Worker", kind: "node" },
-        { label: "Cache", kind: "cache" },
-      ],
-      edges: [
-        { from: "Metrics Service", to: "Metrics DB" },
-        { from: "Metrics Service", to: "Alert Queue" },
-        { from: "Alert Queue", to: "Alert Worker" },
-        { from: "Metrics Service", to: "Cache" },
-      ],
-    },
-  });
-
-  it("keeps (a) untouched and swaps in the LLM names for (b) and (c)", () => {
-    expect(refined.options[0]).toBe(res.options[0]);
-    expect(shapesOf(refined.options[1]).map((s) => s.label)).toContain("Dashboard BFF");
-    expect(refined.options[1].source).toBe("llm");
-    expectWellFormed(board, refined);
-  });
-
-  it("attaches a detached LLM graph to the board instead of letting it float", () => {
-    expect(allAttached(board, refined.options[2])).toBe(true);
-    expect(shapesOf(refined.options[2]).some((s) => s.label === "Client Dashboard")).toBe(false);
-  });
-});
-
-// Real-AI run, 21 Nov: for Checkout + Inventory the LLM drew a node literally named "Checkout + Inventory".
-describe("LLM refinement for a multi-selection keeps the hub wired to both selected nodes", () => {
-  const board = [
-    el({ id: "co", label: "Checkout", x: 100, y: 100 }),
-    el({ id: "inv", label: "Inventory", x: 100, y: 360 }),
-  ];
-  const res = buildNextOptions({ elements: board, selectedIds: ["co", "inv"] })!;
-  const refined = refineOptionsWithGraphs(res, board, {
-    cluster: {
-      nodes: [
-        { label: "Checkout + Inventory", kind: "node" },
-        { label: "Order Service", kind: "node" },
-        { label: "Orders DB", kind: "database" },
-      ],
-      edges: [
-        { from: "Checkout", to: "Order Service" },
-        { from: "Order Service", to: "Orders DB" },
-      ],
-    },
-  });
-
-  it("sends the deterministic names as a baseline for the LLM", () => {
-    expect(res.request!.baseline.cluster[0]).toBe("Order Service");
-    expect(res.request!.baseline.full.length).toBeGreaterThan(1);
-  });
-
-  it("drops combined labels and keeps Order Service connected to Checkout and Inventory", () => {
-    const b = refined.options[1];
-    expect(shapesOf(b).some((s) => s.label.includes("+"))).toBe(false);
-    const hub = shapesOf(b).find((s) => s.label === "Order Service")!;
-    for (const id of ["co", "inv"]) {
-      expect(arrowsOf(b).some((ar) => (ar.fromId === id && ar.toId === hub.id) || (ar.toId === id && ar.fromId === hub.id))).toBe(true);
-    }
-  });
-});
-
 // Charles on prod, 21 Nov: board "App", typed "api gateway", got the generic template beside the board.
 describe("board App, typed 'api gateway'", () => {
   const board = [el({ id: "app", label: "App", x: 200, y: 200 })];
@@ -416,101 +327,6 @@ describe("follow-up options after the full build-out", () => {
   });
 });
 
-// Judges, 21 Nov: the LLM hung Redis off the DB ("DB -caches-> Redis"), pointed replicas at the primary, and
-// renamed the same edge differently in (b) and (c). Such answers fall back to the lexicon option.
-describe("LLM answers are checked for structure and label consistency", () => {
-  const board = [
-    el({ id: "c", label: "Client", x: 0, y: 200 }),
-    el({ id: "api", label: "API", x: 320, y: 200 }),
-    el({ id: "db", label: "DB", kind: "database", x: 640, y: 200, width: 156, height: 86 }),
-    arrow("a1", "c", "api"),
-    arrow("a2", "api", "db"),
-  ];
-  const res = buildNextOptions({ elements: board, selectedIds: ["db"] })!;
-  const labelOf = (o: PredictedAction, id?: string) =>
-    board.find((e) => e.id === id)?.label ?? o.addElements.find((e) => e.id === id)?.label;
-
-  it("rejects a cache hung off the database and keeps the lexicon cluster", () => {
-    const refined = refineOptionsWithGraphs(res, board, {
-      cluster: {
-        nodes: [
-          { label: "Read Replica", kind: "database" },
-          { label: "Redis Cache", kind: "cache" },
-          { label: "Backups", kind: "blob" },
-        ],
-        edges: [
-          { from: "DB", to: "Read Replica", label: "replicates" },
-          { from: "DB", to: "Redis Cache", label: "caches" },
-          { from: "DB", to: "Backups", label: "snapshots" },
-        ],
-      },
-    });
-    expect(refined.options[1]).toBe(res.options[1]);
-  });
-
-  it("never lets a replica write into the primary", () => {
-    const refined = refineOptionsWithGraphs(res, board, {
-      full: {
-        nodes: [
-          { label: "Read Replica", kind: "database" },
-          { label: "Redis Cache", kind: "cache" },
-          { label: "Backups", kind: "blob" },
-          { label: "CDC Stream", kind: "queue" },
-          { label: "Warehouse", kind: "database" },
-          { label: "Failover", kind: "database" },
-        ],
-        edges: [
-          { from: "Read Replica", to: "DB", label: "syncs" },
-          { from: "API", to: "Redis Cache", label: "reads" },
-          { from: "DB", to: "Backups" },
-          { from: "DB", to: "CDC Stream" },
-          { from: "CDC Stream", to: "Warehouse" },
-          { from: "DB", to: "Failover" },
-        ],
-      },
-    });
-    const full = refined.options[2];
-    const replica = full.addElements.filter((e) => /replica/i.test(e.label) && e.kind !== "arrow").map((e) => e.id);
-    expect(full.addElements.some((e) => e.kind === "arrow" && replica.includes(e.fromId!) && e.toId === "db")).toBe(false);
-  });
-
-  it("structureProblems names a replica that writes into the primary", () => {
-    const bad = {
-      ...res.options[0],
-      addElements: [
-        el({ id: "r", label: "Read Replica", kind: "database", x: 900, y: 200 }),
-        el({ id: "x", kind: "arrow", label: "syncs", fromId: "r", toId: "db", x: 0, y: 0, width: 0, height: 0 }),
-      ],
-    };
-    expect(structureProblems(bad, board)).toContain("replica Read Replica writes into DB");
-  });
-
-  it("an edge between the same two nodes reads the same in every option", () => {
-    const refined = refineOptionsWithGraphs(res, board, {
-      cluster: {
-        nodes: [
-          { label: "Read Replica", kind: "database" },
-          { label: "Redis Cache", kind: "cache" },
-          { label: "Backups", kind: "blob" },
-        ],
-        edges: [
-          { from: "DB", to: "Read Replica", label: "streams WAL" },
-          { from: "API", to: "Redis Cache", label: "reads" },
-          { from: "DB", to: "Backups", label: "nightly" },
-        ],
-      },
-    });
-    const names = new Map<string, Set<string>>();
-    for (const o of refined.options) {
-      for (const a of o.addElements.filter((e) => e.kind === "arrow")) {
-        const key = `${labelOf(o, a.fromId)} -> ${labelOf(o, a.toId)}`;
-        names.set(key, new Set([...(names.get(key) ?? []), a.label]));
-      }
-    }
-    for (const [key, set] of names) expect([key, [...set]]).toEqual([key, [...set].slice(0, 1)]);
-  });
-});
-
 // Feature check context-suggestions-multi, 21 Nov: with Payment Gateway between them, the Checkout API -> Ledger DB
 // link vanished because the ghost layout dropped edges that pass a node.
 describe("a link between two selected board nodes always survives", () => {
@@ -522,49 +338,5 @@ describe("a link between two selected board nodes always survives", () => {
     ];
     const res = buildNextOptions({ elements: board, selectedIds: ["api", "led"] })!;
     expect(res.options[0].title).toMatch(/Checkout API.*Ledger DB|Ledger DB.*Checkout API/);
-  });
-});
-
-// Re-judge, 21 Nov: the LLM cluster dropped a node that option (a) had. Since the core loop (22 Nov) a typed
-// name's (a) is the one typed node, so the rule is checked where (a) still has several nodes: a typed flow.
-describe("bigger options contain the smaller one", () => {
-  it("rejects an LLM cluster that leaves out a node of option (a)", () => {
-    const res = buildNextOptions({ elements: [], text: "client -> shortener api", viewportCenter: { x: 600, y: 400 } })!;
-    expect(shapesOf(res.options[0]).map((s) => s.label)).toEqual(["Client", "Shortener API"]);
-    const refined = refineOptionsWithGraphs(res, [], {
-      cluster: {
-        nodes: [
-          { label: "URL Store", kind: "database" },
-          { label: "Redirect Cache", kind: "cache" },
-          { label: "Key Generator", kind: "node" },
-        ],
-        edges: [
-          { from: "URL Store", to: "Redirect Cache" },
-          { from: "URL Store", to: "Key Generator" },
-        ],
-      },
-    });
-    expect(refined.options[1]).toBe(res.options[1]);
-  });
-
-  it("lets an LLM cluster for a typed system stand without the typed node (URL Shortener is not a node of its HLD)", () => {
-    const res = buildNextOptions({ elements: [], text: "url shortener", viewportCenter: { x: 600, y: 400 } })!;
-    const refined = refineOptionsWithGraphs(res, [], {
-      cluster: {
-        nodes: [
-          { label: "Client", kind: "actor" },
-          { label: "Shortener API", kind: "node" },
-          { label: "URL Store", kind: "database" },
-          { label: "Redirect Cache", kind: "cache" },
-        ],
-        edges: [
-          { from: "Client", to: "Shortener API" },
-          { from: "Shortener API", to: "URL Store" },
-          { from: "Shortener API", to: "Redirect Cache" },
-        ],
-      },
-    });
-    expect(refined.options[0]).toBe(res.options[0]);
-    expect(shapesOf(refined.options[1]).map((s) => s.label)).toContain("Shortener API");
   });
 });

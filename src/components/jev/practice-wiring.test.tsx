@@ -33,7 +33,7 @@ describe("practice mode: every AI surface reads the one aiQuiet flag", () => {
       .filter((f) => /fetch\(\s*appUrl\(\s*["'`]\/api\/jev\/decide/.test(readFileSync(f, "utf8")))
       .map((f) => path.relative(process.cwd(), f));
     expect(direct, "call postDecide(body, { aiQuiet: aiQuietRef.current }) from @/lib/jev/ai-quiet instead").toEqual([]);
-    expect(workspace.match(/postDecide\(/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
+    expect(workspace.match(/postDecide\(/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
     for (const call of workspace.matchAll(/postDecide\(\s*\{[\s\S]*?\},\s*\{([^}]*)\}/g)) {
       expect(call[1]).toMatch(/aiQuiet: aiQuietRef\.current/);
     }
@@ -78,9 +78,9 @@ describe("practice mode: every AI surface reads the one aiQuiet flag", () => {
     ).toBe("");
   });
 
-  it("Fork is off: the handler refuses, F falls through to the frame tool, and no Fork button or HUD renders", () => {
+  it("Fork is off: the handler refuses, Alt+F falls through to the frame tool, and no Fork button or HUD renders", () => {
     expect(between(workspace, "const startForkSelection = useCallback", "const applyForkTake")).toMatch(QUIET_RETURN);
-    expect(workspace).toMatch(/e\.key\.toLowerCase\(\) === "f" &&\s*selectedIds\.length > 0 &&\s*!aiQuiet/);
+    expect(workspace).toMatch(/altLetter\(e\) === "F" && selectedIds\.length > 0 && !aiQuiet/);
     expect(workspace).toMatch(/onFork=\{aiQuiet \? undefined : \(\) => (void )?startForkSelection\(\)\}/);
     expect(workspace).toMatch(/\{!aiQuiet && \(\s*<button[^>]*?\s*type="button"\s*onClick=\{\(\) => (void )?startForkSelection\(\)\}/);
     expect(workspace).toMatch(/\{forkSession && !aiQuiet && forkSession\.phase === "pressure" \? \(\s*<ForkPressureStep/);

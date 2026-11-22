@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useSyncExternalStore } from "react";
 import { IconArrowRight, IconBranch, IconClose, IconCpu, IconLayers, IconSpark } from "@/brand/icons";
 import { useAiQuiet } from "@/lib/jev/ai-quiet";
 import {
@@ -30,6 +30,15 @@ const TIER_LABEL: Record<OptionTier, string> = { minimal: "small", cluster: "clu
 const KEY = "rounded border border-border bg-secondary px-1.5 py-0.5 font-semibold text-foreground";
 const KEY_PRIMARY =
   "rounded border border-[#2563EB]/30 bg-[#2563EB]/10 px-1.5 py-0.5 font-semibold text-[#1D4ED8] dark:border-[#38BDF8]/30 dark:bg-[#38BDF8]/15 dark:text-[#38BDF8]";
+
+const PHONE = "(max-width: 639px)";
+const watchPhone = (onChange: () => void) => {
+  const query = window.matchMedia(PHONE);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+};
+/** A phone-width screen: the suggestions are one row of chips so the board stays visible. */
+const useIsPhone = () => useSyncExternalStore(watchPhone, () => window.matchMedia(PHONE).matches, () => false);
 
 /** What Enter and Tab do right now, in the order the user reaches for them. */
 function keyLegend(typing: boolean, completion: string | null, active: PredictedAction | undefined, activeIndex: number) {
@@ -70,6 +79,7 @@ export function PredictionHud({
   typing = false,
 }: PredictionHudProps) {
   const aiQuiet = useAiQuiet();
+  const phone = useIsPhone();
   if (aiQuiet || (!intent && predictions.length === 0)) return null;
 
   const isTiered = predictions.length > 0 && predictions.every((p) => p.tier);
@@ -88,6 +98,60 @@ export function PredictionHud({
       : isTiered
         ? "Next: small to big"
         : "Suggestions";
+
+  const pctOf = (pred: PredictedAction, idx: number) =>
+    isLiveJev && typeof pred.probability === "number" && idx === jevPick
+      ? Math.max(1, Math.round(pred.probability * 100))
+      : null;
+
+  if (phone) {
+    if (predictions.length === 0) return null;
+    return (
+      <div
+        role="region"
+        aria-label="Predictive drafting suggestions"
+        className="pointer-events-auto flex w-full items-center gap-1.5 overflow-x-auto px-3 [scrollbar-width:none]"
+      >
+        {predictions.map((pred, idx) => {
+          const isActive = idx === activeIndex;
+          const pct = pctOf(pred, idx);
+          return (
+            <button
+              key={pred.id}
+              type="button"
+              aria-pressed={isActive}
+              data-option-category={pred.category}
+              title={pred.subtitle}
+              onClick={() => onApply(idx)}
+              className={`jev-glass flex min-h-[44px] max-w-[72vw] shrink-0 items-center gap-2 rounded-full border px-3 text-left text-[13px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                isActive
+                  ? "border-[#2563EB]/60 bg-[#2563EB]/12 text-foreground dark:border-[#38BDF8]/60 dark:bg-[#38BDF8]/15"
+                  : "text-foreground/85"
+              }`}
+            >
+              <span
+                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md font-mono text-[11px] ${
+                  isActive ? "bg-[#2563EB] text-white dark:bg-[#38BDF8] dark:text-[#0F172A]" : "bg-secondary text-muted-foreground"
+                }`}
+              >
+                {idx + 1}
+              </span>
+              <span className="truncate">{pred.title}</span>
+              {pct !== null && <span className="shrink-0 font-mono text-[10px] font-semibold text-muted-foreground">jev pick {pct}%</span>}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Dismiss predictions"
+          className="jev-glass flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-full text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <IconClose className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -166,10 +230,7 @@ export function PredictionHud({
             {predictions.map((pred, idx) => {
               const isActive = idx === activeIndex;
               // The order and the highlight are the board's; jev's pick alone carries its percentage.
-              const pct =
-                isLiveJev && typeof pred.probability === "number" && idx === jevPick
-                  ? Math.max(1, Math.round(pred.probability * 100))
-                  : null;
+              const pct = pctOf(pred, idx);
 
               return (
                 <button

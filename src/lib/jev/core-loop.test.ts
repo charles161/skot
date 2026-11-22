@@ -3,7 +3,14 @@
 // still added it, we should still add it in the best possible space possible."
 import { describe, expect, it } from "vitest";
 import { connectionOptions, isFlowText, planTypedNode, typedNodeLabel } from "@/lib/jev/core-loop";
-import { buildAfterCreateOptions, buildNextOptions, predictConcept, refineOptionsWithGraphs } from "@/lib/jev/next-options";
+import {
+  bestContextOption,
+  buildAfterCreateOptions,
+  buildNextOptions,
+  placeContextOption,
+  predictConcept,
+} from "@/lib/jev/next-options";
+import type { PredictedAction } from "@/lib/jev/types";
 import type { JevElement, ShapeKind } from "@/lib/jev/types";
 
 const el = (o: Partial<JevElement> & { id: string; label: string }): JevElement => ({
@@ -204,6 +211,20 @@ describe("placement: free space beside the selected, related or last node", () =
     expect(picked.anchorId).toBe("app");
   });
 
+  // First judge on prod, 22 Nov: on a phone the nodes went in one row and the earlier ones scrolled off screen.
+  it("on a phone-sized view, goes under the last node when the next column would be off screen", () => {
+    const phone = { x: 0, y: 0, width: 736, height: 1100 };
+    const first = el({ id: "a", label: "Alpha", x: 100, y: 300 });
+    const second = plan("beta", [first], { lastFocusedId: "a", viewport: phone, viewportCenter: { x: 368, y: 550 } }).node;
+    expect(second.x).toBeGreaterThan(first.x + first.width);
+    const third = plan("gamma", [first, second], { lastFocusedId: second.id, viewport: phone, viewportCenter: { x: 368, y: 550 } }).node;
+    expect(third.x + third.width).toBeLessThanOrEqual(phone.width);
+    expect(third.y).toBeGreaterThan(second.y + second.height);
+    const desktop = { x: 0, y: 0, width: 1440, height: 650 };
+    const wide = plan("gamma", [first, second], { lastFocusedId: second.id, viewport: desktop, viewportCenter: { x: 720, y: 325 } }).node;
+    expect(wide.y + wide.height / 2).toBe(second.y + second.height / 2);
+  });
+
   it("is the same every time for the same board and text", () => {
     const a = plan("redis", chain, { lastFocusedId: "pg" }).node;
     const b = plan("redis", chain, { lastFocusedId: "pg" }).node;
@@ -316,7 +337,6 @@ describe("connections are offered after the node exists, never applied", () => {
     expect(result.options).toHaveLength(3);
     expect(result.options[0].title).toBe("App → API Gateway");
     expect(result.options.slice(1).every((o) => o.addElements.some((e) => e.kind !== "arrow"))).toBe(true);
-    expect(result.request).toBeNull();
   });
 
   it("never offers the same link twice", () => {
@@ -354,11 +374,10 @@ describe("typing shows what Enter adds as option 1", () => {
     expect(result.typed!.anchorId).toBe("app");
   });
 
-  it("still shows the node for a one-letter name, with nothing for the server to rank", () => {
+  it("still shows the node for a one-letter name", () => {
     const result = typed("q", chain, { subjectId: "pg" });
     expect(result.options).toHaveLength(1);
     expect(result.options[0].title).toBe("Q");
-    expect(result.request).toBeNull();
   });
 
   it("never offers an option that would add nothing", () => {
@@ -397,15 +416,6 @@ describe("typing shows what Enter adds as option 1", () => {
     expect(sizes[0]).toBe(1);
     expect(sizes[1]).toBeGreaterThan(sizes[0]);
     expect(sizes[2]).toBeGreaterThan(sizes[1]);
-  });
-
-  it("the LLM can reshape the bigger options but never option 1", () => {
-    const result = typed("api gateway", [app], { subjectId: "app" });
-    const refined = refineOptionsWithGraphs(result, [app], {
-      cluster: { nodes: [{ label: "API Gateway", kind: "lb" }, { label: "Auth Service", kind: "node" }, { label: "Rate Limiter", kind: "node" }], edges: [] },
-      full: null,
-    });
-    expect(refined.options[0]).toBe(result.options[0]);
   });
 
   // Second judge on prod, 22 Nov: with App on the board, "worker -> queue" also drew App -> Worker.
@@ -452,5 +462,66 @@ describe("typing shows what Enter adds as option 1", () => {
     const shapes = result.options[0].addElements.filter((e) => e.kind !== "arrow").map((e) => e.label);
     expect(shapes).toEqual(["App", "API Gateway", "Postgres"]);
     expect(result.options[0].addElements.filter((e) => e.kind === "arrow")).toHaveLength(2);
+  });
+});
+
+// Charles, 22 Nov 2026 (5A): nothing is asked while typing; after a node is added or clicked, one call names a
+// next node from the board (the context route) and jev scores the options.
+describe("the node the AI names from the board", () => {
+  const board = [app, gateway, arrow("a1", "app", "gw")];
+  const local = () => buildNextOptions({ elements: board, subjectId: "gw", viewportCenter: CENTER })!.options;
+  const named = (id: string, label: string) => ({ id, label, kind: "node" as const, edgeLabel: "resizes" });
+
+  it("becomes one node beside the subject, linked from it, never on another node", () => {
+    const option = bestContextOption([named("ctx_0", "Thumbnail Worker")], null, gateway, board, local())!;
+    const [node, link] = option.addElements;
+    expect(option).toMatchObject({ id: "ctx_0", title: "Thumbnail Worker", nodeCount: 1 });
+    expect(link).toMatchObject({ kind: "arrow", fromId: "gw", toId: node.id, label: "resizes" });
+    for (const other of [app, gateway]) expect(boxesOverlap(node, other, 16)).toBe(false);
+    expect(gapBetween(node, gateway)).toBeLessThanOrEqual(200);
+  });
+
+  it("takes the suggestion jev scores highest, and carries that score", () => {
+    const suggestions = [named("ctx_0", "Thumbnail Worker"), named("ctx_1", "Upload Scanner")];
+    const option = bestContextOption(suggestions, { ctx_0: 0.1, ctx_1: 0.7 }, gateway, board, local())!;
+    expect(option.title).toBe("Upload Scanner");
+    expect(option.probability).toBe(0.7);
+  });
+
+  it("skips names that are generic, malformed, already on the board or already offered", () => {
+    const offered = local()[0].addElements.find((e) => e.kind !== "arrow")!.label;
+    const junk = [named("ctx_0", "App"), named("ctx_1", offered), named("ctx_2", "Next Step"), { id: "nope", label: "X", kind: "node" as const }];
+    expect(bestContextOption(junk, null, gateway, board, local())).toBeNull();
+  });
+
+  const opt = (id: string, nodes: number, tier?: PredictedAction["tier"]): PredictedAction => ({
+    id,
+    title: id,
+    subtitle: "",
+    category: nodes ? "extend" : "connect",
+    ...(tier ? { tier } : {}),
+    addElements: [
+      ...Array.from({ length: nodes }, (_, i) => el({ id: `${id}_${i}`, label: `${id} ${i}` })),
+      arrow(`${id}_a`, "app", "gw"),
+    ],
+  });
+  const ctx = opt("ctx_0", 1);
+  const ids = (options: PredictedAction[]) => options.map((o) => o.id);
+
+  it("never takes the highlighted slot: what Enter does is the same before and after the AI answers", () => {
+    const tiers = [opt("a", 1, "minimal"), opt("b", 3, "cluster"), opt("c", 7, "full")];
+    for (const active of [0, 1, 2]) {
+      const placed = placeContextOption(tiers, active, ctx);
+      expect(placed).toHaveLength(3);
+      expect(placed[active]).toBe(tiers[active]);
+      expect(ids(placed)).toContain("ctx_0");
+    }
+  });
+
+  it("replaces a one-node step first, then the cluster, and keeps the links and the full design", () => {
+    expect(ids(placeContextOption([opt("link", 0), opt("step", 1, "minimal"), opt("cluster", 3, "cluster")], 0, ctx))).toEqual(["link", "ctx_0", "cluster"]);
+    expect(ids(placeContextOption([opt("a", 1, "minimal"), opt("b", 3, "cluster"), opt("c", 7, "full")], 0, ctx))).toEqual(["a", "ctx_0", "c"]);
+    expect(ids(placeContextOption([opt("l1", 0), opt("l2", 0), opt("l3", 0)], 0, ctx))).toEqual(["l1", "l2", "ctx_0"]);
+    expect(ids(placeContextOption([opt("l1", 0)], 0, ctx))).toEqual(["l1", "ctx_0"]);
   });
 });

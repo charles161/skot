@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeBounds,
   computeViewportEnsureVisible,
+  computeViewportKeepBoard,
   computeViewportFit,
   distanceBetween,
   findFreeSpot,
@@ -427,5 +428,36 @@ describe("geometry utilities", () => {
     expect(
       zoomedOut.x + (hugeForkBounds.x + hugeForkBounds.width) * zoomedOut.zoom
     ).toBeLessThanOrEqual(1440 - margins.right + 1);
+  });
+});
+
+// Judges on prod, 22 Nov: as a row of nodes grew, the view followed the newest and the first ones scrolled away.
+describe("computeViewportKeepBoard: a growing diagram stays whole", () => {
+  const screen = { screenWidth: 1440, screenHeight: 900, margins: { top: 104, right: 64, bottom: 255, left: 64 } };
+  const vp = { x: 0, y: 0, zoom: 1 };
+  const node = (x: number) => ({ x, y: 300, width: 172, height: 72 });
+  const onScreen = (v: { x: number; y: number; zoom: number }, r: { x: number; y: number; width: number; height: number }) =>
+    v.x + r.x * v.zoom >= 62 && v.x + (r.x + r.width) * v.zoom <= 1440 - 62 && v.y + r.y * v.zoom >= 102 && v.y + (r.y + r.height) * v.zoom <= 900 - 253;
+
+  it("does not move while the new node is already in view", () => {
+    expect(computeViewportKeepBoard(vp, node(600), { x: 100, y: 300, width: 400, height: 72 }, screen)).toBe(vp);
+  });
+
+  it("zooms out to show the first node and the new one when the new one is off screen", () => {
+    const board = { x: 100, y: 300, width: 1272, height: 72 };
+    const next = computeViewportKeepBoard(vp, node(1500), board, screen);
+    expect(next.zoom).toBeLessThan(1);
+    expect(next.zoom).toBeGreaterThanOrEqual(0.5);
+    expect(onScreen(next, node(100))).toBe(true);
+    expect(onScreen(next, node(1500))).toBe(true);
+  });
+
+  it("never zooms in, and pans to the new node once the whole board would be unreadable", () => {
+    const small = { x: 100, y: 300, width: 172, height: 72 };
+    expect(computeViewportKeepBoard({ x: 0, y: 0, zoom: 0.8 }, node(2000), small, screen).zoom).toBeLessThanOrEqual(0.8);
+    const huge = { x: 100, y: 300, width: 6000, height: 72 };
+    const next = computeViewportKeepBoard(vp, node(6400), huge, screen);
+    expect(next.zoom).toBe(1);
+    expect(onScreen(next, node(6400))).toBe(true);
   });
 });

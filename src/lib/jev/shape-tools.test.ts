@@ -6,7 +6,7 @@ import {
   isShapeTool,
   shapeFromTool,
 } from "@/lib/jev/shape-tools";
-import { TOOL_SHORTCUT_KEYS, toolForShortcutKey } from "@/lib/jev/shortcuts";
+import { altLetter, isTypedLetter, TOOL_SHORTCUT_KEYS, toolForShortcut } from "@/lib/jev/shortcuts";
 import { HLD_SHAPE_KINDS, LLD_SHAPE_KINDS, SHAPE_KINDS, type ShapeKind } from "@/lib/jev/types";
 
 const at = { x: 500, y: 300 };
@@ -51,10 +51,41 @@ describe("keyboard: new kinds steal no keys", () => {
   });
 
   it("no letter resolves to a flyout kind", () => {
-    for (const c of "abcdefghijklmnopqrstuvwxyz0123456789") {
-      const tool = toolForShortcutKey(c);
+    for (const c of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
+      const tool = toolForShortcut({ key: c.toLowerCase(), code: `Key${c}`, altKey: true, ctrlKey: false, metaKey: false });
       if (tool) expect(isMoreShapeKind(tool)).toBe(false);
     }
+  });
+});
+
+// Charles, 22 Nov 2026 (1A): a letter typed on the board is the start of a node name; tools are on Alt+letter.
+describe("keyboard: bare letters are text, Alt+letter is a tool", () => {
+  const key = (k: string, code: string, mods: Partial<{ altKey: boolean; ctrlKey: boolean; metaKey: boolean }> = {}) => ({
+    key: k,
+    code,
+    altKey: false,
+    ctrlKey: false,
+    metaKey: false,
+    ...mods,
+  });
+
+  it("a bare letter never picks a tool", () => {
+    for (const c of "shrdocafpt") expect(toolForShortcut(key(c, `Key${c.toUpperCase()}`))).toBeNull();
+  });
+
+  it("Alt+letter picks the tool by the physical key, whatever the Option key types on a Mac", () => {
+    expect(toolForShortcut(key("®", "KeyR", { altKey: true }))).toBe("node");
+    expect(toolForShortcut(key("ß", "KeyS", { altKey: true }))).toBe("select");
+    expect(altLetter(key("ƒ", "KeyF", { altKey: true }))).toBe("F");
+    expect(toolForShortcut(key("r", "KeyR", { altKey: true, metaKey: true }))).toBeNull();
+  });
+
+  it("letters of any script are text for the Thought Bar; digits, symbols and chords are not", () => {
+    for (const c of ["a", "Z", "é", "ñ", "日", "ж"]) expect(isTypedLetter(key(c, "KeyA"))).toBe(true);
+    for (const c of ["1", "/", " ", "[", "Enter", "Tab", "Backspace", "F2"]) expect(isTypedLetter(key(c, "X"))).toBe(false);
+    expect(isTypedLetter(key("a", "KeyA", { ctrlKey: true }))).toBe(false);
+    expect(isTypedLetter(key("a", "KeyA", { metaKey: true }))).toBe(false);
+    expect(isTypedLetter(key("å", "KeyA", { altKey: true }))).toBe(false);
   });
 });
 
