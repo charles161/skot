@@ -877,6 +877,11 @@ interface Context {
   pinnedId?: string;
   /** A typed flow is drawn exactly as typed: its nodes are not also linked to the board. */
   standalone?: boolean;
+  /**
+   * The nodes the user named in a typed flow. Each is the board node with exactly that name, or a new node
+   * with that name: never another node standing in for it ("Postgres" is not the board's "URL DB").
+   */
+  typedKeys?: Set<string>;
 }
 
 interface Materialized {
@@ -921,11 +926,12 @@ function materialize(draft: Draft, ctx: Context): Materialized {
   for (const node of draft.nodes) {
     const probe = node.matchLabel ? { ...node, label: node.matchLabel } : node;
     const preferAnchor = anchor && sameThing(anchor, probe) ? anchor : null;
-    const match =
-      preferAnchor ??
-      boardShapes.find((e) => sameThing(e, probe)) ??
-      (isPin(probe) ? pin : null) ??
-      findBoardCounterpart(probe, boardShapes, wired);
+    const match = ctx.typedKeys?.has(node.key)
+      ? boardShapes.find((e) => norm(e.label) === norm(node.label)) ?? null
+      : preferAnchor ??
+        boardShapes.find((e) => sameThing(e, probe)) ??
+        (isPin(probe) ? pin : null) ??
+        findBoardCounterpart(probe, boardShapes, wired);
     if (match) {
       resolved.set(node.key, match.id);
       if (match.id === ctx.pinnedId) pinned = true;
@@ -1259,7 +1265,7 @@ function materializeAround(draft: Draft, ctx: Context, pinnedCtx: Context | null
  */
 function finish(drafts: Draft[], base: Context, typed: PredictedAction | null, exact: boolean): PredictedAction[] | null {
   // A typed flow keeps to the arrows the user typed: no extra link to the board (connections are never forced).
-  const ctx: Context = exact ? { ...base, standalone: true } : base;
+  const ctx: Context = exact ? { ...base, standalone: true, typedKeys: new Set(drafts[0].nodes.map((n) => n.key)) } : base;
   const pinnedCtx = typed ? pinTypedNode(ctx, typed.addElements[0]) : null;
   const build = (draft: Draft, bigger: boolean): Materialized => materializeAround(draft, ctx, bigger ? pinnedCtx : null);
   const built = drafts.map((d, i) => ({ draft: d, m: build(d, i > 0) }));
@@ -1324,7 +1330,9 @@ export function buildNextOptions(input: NextOptionsInput): NextOptionsResult | n
   const ctx: Context = { elements, anchor, viewportCenter, selectedIds: input.selectedIds, allowGeneric: Boolean(text) || (input.selectedIds ?? []).length >= 1 };
   const raw = draftsFor(input, ctx, concept, shapes);
   const subjectEl = !text && (input.selectedIds ?? []).length <= 1 ? anchor : null;
-  const options = raw ? finish(adaptDrafts(raw, domainWord(text ? anchor : subjectEl)), ctx, typed, flow) : null;
+  // A typed flow keeps its names; everything else may take the board's domain word ("URL DB" on a shortener board).
+  const drafts = raw && (flow ? raw : adaptDrafts(raw, domainWord(text ? anchor : subjectEl)));
+  const options = drafts ? finish(drafts, ctx, typed, flow) : null;
 
   const selected = (input.selectedIds ?? []).map((id) => shapes.find((s) => s.id === id)).filter((x): x is JevElement => Boolean(x));
   const predicted = text ? predictConcept(text, elements, anchor) : null;

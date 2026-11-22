@@ -425,6 +425,27 @@ describe("typing shows what Enter adds as option 1", () => {
     expect(reuse.addElements.filter((e) => e.kind === "arrow")[0]).toMatchObject({ fromId: "app" });
   });
 
+  // Third judge on prod, 22 Nov: with an uploads node on the board, "api gateway -> postgres" drew "Uploads DB".
+  it("a typed flow keeps the names that were typed, whatever the board is about", () => {
+    const story = el({ id: "s", label: "User Uploads a Photo, a Worker Makes Thumbnails and Stores Them in S3", x: 700, y: 300 });
+    for (const extra of [{ subjectId: "s" }, { selectedIds: ["s"] }, {}]) {
+      const [flow] = typed("api gateway -> postgres", [app, gateway, story], extra).options;
+      const shapes = flow.addElements.filter((e) => e.kind !== "arrow");
+      expect(shapes.map((e) => e.label)).toEqual(["Postgres"]);
+      expect(flow.addElements.filter((e) => e.kind === "arrow")).toHaveLength(1);
+      expect(flow.addElements.find((e) => e.kind === "arrow")).toMatchObject({ fromId: "gw", toId: shapes[0].id });
+    }
+  });
+
+  it("a typed flow reuses a board node only by its name, never as a stand-in", () => {
+    const urlDb = el({ id: "udb", label: "URL DB", kind: "database", x: 700, y: 300, width: 156, height: 86 });
+    const flow = typed("client -> postgres", [app, urlDb]).options[0];
+    expect(flow.addElements.filter((e) => e.kind !== "arrow").map((e) => e.label)).toEqual(["Client", "Postgres"]);
+    const byName = typed("app -> url db", [app, urlDb]).options[0];
+    expect(byName.addElements.filter((e) => e.kind !== "arrow")).toHaveLength(0);
+    expect(byName.addElements.find((e) => e.kind === "arrow")).toMatchObject({ fromId: "app", toId: "udb" });
+  });
+
   it("a typed flow is drawn as typed, with the same capitals", () => {
     const result = typed("app -> api gateway -> postgres", []);
     expect(result.typed).toBeNull();
