@@ -117,6 +117,8 @@ export function ThoughtBar({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Enter / Tab that only confirm an input-method composition (Japanese, Chinese, Korean) belong to the IME.
+    if (e.nativeEvent.isComposing) return;
     const hasText = value.trim().length > 0;
 
     if (isCommand && handleCommandKeyDown(e)) return;

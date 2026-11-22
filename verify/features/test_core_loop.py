@@ -15,6 +15,7 @@ from conftest import assert_no_console_errors, check
 from driver import Driver, is_shape, overlapping_pairs
 from test_features import THOUGHT_BAR, ghosts, read_options, shot
 
+SUGGESTIONS_PANEL = '[role=region][aria-label="Predictive drafting suggestions"] button[aria-pressed]'
 SHAPES_JS = "() => document.querySelectorAll('[role=application] svg [data-element-id]:not([data-kind=arrow])').length"
 JEV = {"source": "gateway:typesafe-ai/jev", "model": "typesafe-ai/jev", "isHeuristic": False, "latencyMs": 90}
 
@@ -294,3 +295,36 @@ def test_core_loop_ai_optional(page, skot, new_page, evidence, base_url, ai):
     # The page fixture's own tab is unused; the failures the "fail" visitor logs are the point of the test.
     errs = [e for e in evidence.errors() if e["who"] not in ("fail",)]
     assert not errs, "console errors outside the AI-failing visitor: %s" % json.dumps(errs[:6], indent=1)
+
+
+@check("core-loop-keyboard")
+def test_core_loop_keyboard(page, skot, evidence, ai):
+    """No mouse at all, from the moment the page opens."""
+    ai(page, "fail")
+    evidence.events.clear()
+    skot.new_board()
+    assert bar_of(page).evaluate("el => el === document.activeElement"), "the Thought Bar should have the caret when the board opens"
+    page.keyboard.type("app", delay=25)
+    page.keyboard.press("Enter")
+    board(skot, 1)
+    page.keyboard.type("api", delay=25)
+    page.keyboard.press("Tab")
+    assert bar_of(page).input_value() == "API Gateway", "Tab completes the name: %r" % bar_of(page).input_value()
+    page.keyboard.press("Enter")
+    board(skot, 2)
+    assert read_options(page), "the connection should be offered"
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(250)
+    shot(page, evidence, "core-loop-keyboard", "1-after-escape")
+    assert page.locator(SUGGESTIONS_PANEL).count() == 0, "Esc should dismiss the suggestions"
+    assert bar_of(page).evaluate("el => el === document.activeElement"), "Esc on suggestions must keep the caret in the bar"
+    page.keyboard.type("postgres", delay=25)
+    page.keyboard.press("Enter")
+    els = board(skot, 3)
+    page.keyboard.press("Enter")  # accept API Gateway -> Postgres
+    els = skot.wait_state(lambda es: len([e for e in es if e.get("kind") == "arrow"]) == 1, what="Enter to accept the link")
+    shot(page, evidence, "core-loop-keyboard", "2-done")
+    evidence.note(nodes=[e["label"] for e in by_creation(els)], arrows=arrows_named(els))
+    assert [e["label"] for e in by_creation(els)] == ["App", "API Gateway", "Postgres"]
+    assert arrows_named(els) == [("API Gateway", "Postgres")], arrows_named(els)
+    assert not [e for e in evidence.errors() if "/api/jev/decide" not in e["text"] and "500" not in e["text"]], evidence.errors()[:4]

@@ -78,6 +78,14 @@ features:
       - src/components/jev/JevWorkspace.tsx
       - src/app/api/jev/decide/route.ts
 
+  - id: core-loop-keyboard
+    title: "Core loop with no mouse: the bar has the caret when the board opens, Tab completes the name, Enter adds it,
+      Esc dismisses the offered connection and keeps the caret, Enter on the empty bar accepts one; AI down throughout"
+    check: core-loop-keyboard
+    sources:
+      - src/components/jev/ThoughtBar.tsx
+      - src/components/jev/PredictionHud.tsx
+
   - id: ghost-predictions
     title: Tab cycles the three ghost predictions and Enter materializes the active one
     check: ghost-predictions
