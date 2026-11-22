@@ -47,6 +47,37 @@ features:
       - src/components/jev/ThoughtBar.tsx
       - src/app/api/jev/decide/route.ts
 
+  - id: core-loop-enter-creates
+    title: "Core loop 1: typing a name and pressing Enter always adds one node with that name at once (AI hanging,
+      one-letter names, names already on the board, jev preferring the full diagram); it never draws a diagram"
+    check: core-loop-enter-creates
+    sources:
+      - src/components/jev/ThoughtBar.tsx
+      - src/components/jev/JevWorkspace.tsx
+
+  - id: core-loop-placement
+    title: "Core loop 2: a new node lands in free space beside the selected or last-touched node, on screen, never on
+      another node; nothing on the board moves; the same keys give the same layout on a second board"
+    check: core-loop-placement
+    sources:
+      - src/components/jev/ThoughtBar.tsx
+      - src/components/jev/JevWorkspace.tsx
+
+  - id: core-loop-connections-suggested
+    title: "Core loop 3: after a node is added its connection is offered as a ghost arrow, never drawn; Enter on the
+      empty bar accepts it, typing the next name skips it, and a late jev answer never moves the highlight"
+    check: core-loop-connections-suggested
+    sources:
+      - src/components/jev/PredictionHud.tsx
+      - src/components/jev/JevWorkspace.tsx
+
+  - id: core-loop-ai-optional
+    title: "Core loop 4: the same keys on the same board give the same board whether the AI answers, fails or hangs"
+    check: core-loop-ai-optional
+    sources:
+      - src/components/jev/JevWorkspace.tsx
+      - src/app/api/jev/decide/route.ts
+
   - id: ghost-predictions
     title: Tab cycles the three ghost predictions and Enter materializes the active one
     check: ghost-predictions
