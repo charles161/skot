@@ -48,8 +48,8 @@ const HAIKU_MODEL = "anthropic/claude-haiku-5.5";
 
 /**
  * The model each gateway route uses, pinned by a unit test. Haiku won the 22 Nov 2026 model eval on the short-output
- * routes, and on Fork once that prompt stated its schema's limits. next_options and generate_graph stay on
- * gpt-4.1-mini: Haiku overruns their length caps.
+ * routes. Fork uses it for quality, at slightly lower validity than gpt-4.1-mini (numbers at the pin test).
+ * next_options and generate_graph stay on gpt-4.1-mini: Haiku overruns their length caps.
  * Env overrides: AI_GATEWAY_MODEL_<ROUTE> (e.g. AI_GATEWAY_MODEL_MORPH) for one route, AI_GATEWAY_MODEL for all.
  */
 export const LLM_ROUTE_MODELS = {
