@@ -8,7 +8,7 @@ import { resetDecideStateForTests } from "@/lib/server/decide-state";
 
 const GATEWAY_URL = "https://ai-gateway.vercel.sh/v1/chat/completions";
 const GW_KEY = "gw-test-key-91c2";
-const ENV = ["AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN", "VERCEL", "TYPESAFE_API_KEY", "JEV_UPSTREAM_MAX_PER_MINUTE"];
+const ENV = ["AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN", "VERCEL", "TYPESAFE_API_KEY", "JEV_UPSTREAM_MAX_PER_MINUTE", "AI_GATEWAY_MODEL", "AI_GATEWAY_MODEL_MOVES"];
 
 const body = {
   move: "break",
@@ -73,6 +73,7 @@ describe("POST /api/jev/moves", () => {
     expect(url).toBe(GATEWAY_URL);
     expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${GW_KEY}`);
     expect(String(init.body)).not.toContain(GW_KEY);
+    expect(JSON.parse(String(init.body))).toMatchObject({ model: "anthropic/claude-haiku-5.5", reasoning_effort: "none" });
     expect(text).not.toContain(GW_KEY);
   });
 

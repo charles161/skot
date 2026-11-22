@@ -4,15 +4,25 @@ import {
   DEFAULT_AI_GATEWAY_MODEL,
   generateForkTakesWithLlm,
   generateMorphSpecWithLlm,
+  generatePracticeReviewWithLlm,
   generateSemanticGraphWithLlm,
+  LLM_ROUTE_MODELS,
   proposeContextNodesWithLlm,
+  proposeOptionGraphsWithLlm,
+  requestStructuredJsonFromLlm,
   resolveGatewayAuth,
   type GatewayAuth,
 } from "@/lib/jev/llm-graph-client";
 import { SEMANTIC_KIND_HINTS, SEMANTIC_NODE_KINDS } from "@/lib/jev/semantic-graph";
 
 const TEST_AUTH: GatewayAuth = { token: "gw-test-token", method: "api-key" };
-const GATEWAY_ENV = ["AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN", "VERCEL", "AI_GATEWAY_MODEL"];
+const GATEWAY_ENV = [
+  "AI_GATEWAY_API_KEY",
+  "VERCEL_OIDC_TOKEN",
+  "VERCEL",
+  "AI_GATEWAY_MODEL",
+  ...Object.keys(LLM_ROUTE_MODELS).map((route) => `AI_GATEWAY_MODEL_${route.toUpperCase()}`),
+];
 
 function completion(content: string, model = "openai/gpt-4.1-mini"): Response {
   return new Response(
@@ -80,7 +90,7 @@ describe("llm-graph-client: structured JSON graph generation & safe fallback", (
     expect(AI_GATEWAY_CHAT_COMPLETIONS_URL).toBe("https://ai-gateway.vercel.sh/v1/chat/completions");
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer oidc-abc");
     const body = JSON.parse(String(init.body));
-    expect(body.model).toBe(DEFAULT_AI_GATEWAY_MODEL);
+    expect(body.model).toBe(LLM_ROUTE_MODELS.context);
     expect(body.response_format).toEqual({ type: "json_object" });
     expect(String(init.body)).not.toContain("oidc-abc");
   });
@@ -521,5 +531,98 @@ describe("generation budgets (real gateway: 3 fork takes timed out at the 6.5 s 
     await generateForkTakesWithLlm({ auth: TEST_AUTH, selectedIds: ["a"], boardGraph: {} });
     const budgets = timeoutSpy.mock.calls.map((c) => c[0]);
     expect(Math.max(...budgets)).toBeGreaterThanOrEqual(20000);
+  });
+});
+
+describe("llm-graph-client: per-route model selection", () => {
+  const saved: Record<string, string | undefined> = {};
+  beforeEach(() => {
+    for (const k of GATEWAY_ENV) saved[k] = process.env[k];
+    for (const k of GATEWAY_ENV) delete process.env[k];
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    for (const k of GATEWAY_ENV) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  // Model eval 22 Nov 2026 (evals/models/RESULTS.md on branch model-eval): Haiku 5.5 wins context, practice review,
+  // moves and morph; next_options, Fork and generate keep gpt-4.1-mini until their prompts state length limits.
+  // Changing a route's model needs a re-run of that eval, then this pin.
+  it("pins the model every gateway route uses", () => {
+    expect(DEFAULT_AI_GATEWAY_MODEL).toBe("openai/gpt-4.1-mini");
+    expect(LLM_ROUTE_MODELS).toEqual({
+      context: "anthropic/claude-haiku-5.5",
+      practice_review: "anthropic/claude-haiku-5.5",
+      moves: "anthropic/claude-haiku-5.5",
+      morph: "anthropic/claude-haiku-5.5",
+      next_options: "openai/gpt-4.1-mini",
+      fork: "openai/gpt-4.1-mini",
+      generate_graph: "openai/gpt-4.1-mini",
+    });
+  });
+
+  const sentBody = (fetchSpy: ReturnType<typeof vi.fn>) =>
+    JSON.parse(String((fetchSpy.mock.calls[0][1] as RequestInit).body)) as { model: string; reasoning_effort?: string };
+
+  const callers: Array<[string, () => Promise<unknown>]> = [
+    ["context", () => proposeContextNodesWithLlm({ auth: TEST_AUTH, context: { subjectLabel: "A", neighborLabels: [] } })],
+    [
+      "practice_review",
+      () =>
+        generatePracticeReviewWithLlm({ auth: TEST_AUTH, promptId: "url-shortener", boardGraph: { nodes: [] }, rubric: [], comments: [] }),
+    ],
+    [
+      "morph",
+      () =>
+        generateMorphSpecWithLlm({
+          auth: TEST_AUTH,
+          targetNotation: "sequence",
+          selectedIds: ["a"],
+          boardGraph: {},
+          selection: { actors: [], messages: [] },
+        }),
+    ],
+    [
+      "next_options",
+      () => proposeOptionGraphsWithLlm({ auth: TEST_AUTH, request: { conceptLabel: "Cache", selectedLabels: [], boardLabels: [] } }),
+    ],
+    ["fork", () => generateForkTakesWithLlm({ auth: TEST_AUTH, selectedIds: ["a"], boardGraph: {} })],
+    ["generate_graph", () => generateSemanticGraphWithLlm({ auth: TEST_AUTH, prompt: "url shortener" })],
+  ];
+
+  for (const [route, call] of callers) {
+    it(`${route} sends its pinned model with reasoning_effort "none"`, async () => {
+      const fetchSpy = vi.fn().mockResolvedValue(completion("{}"));
+      vi.stubGlobal("fetch", fetchSpy);
+      await call();
+      expect(sentBody(fetchSpy).model).toBe(LLM_ROUTE_MODELS[route as keyof typeof LLM_ROUTE_MODELS]);
+      expect(sentBody(fetchSpy).reasoning_effort).toBe("none");
+    });
+  }
+
+  it("AI_GATEWAY_MODEL overrides every route; AI_GATEWAY_MODEL_<ROUTE> overrides one route and wins over it", async () => {
+    process.env.AI_GATEWAY_MODEL = "google/gemini-3.5-flash-lite";
+    process.env.AI_GATEWAY_MODEL_MORPH = " openai/gpt-6-luna ";
+    const fetchSpy = vi.fn().mockImplementation(() => Promise.resolve(completion("{}")));
+    vi.stubGlobal("fetch", fetchSpy);
+    for (const route of ["context", "morph", "fork"] as const) {
+      await requestStructuredJsonFromLlm({ auth: TEST_AUTH, route, systemPrompt: "s", userPayload: {} });
+    }
+    const models = fetchSpy.mock.calls.map(([, init]) => JSON.parse(String((init as RequestInit).body)).model);
+    expect(models).toEqual(["google/gemini-3.5-flash-lite", "openai/gpt-6-luna", "google/gemini-3.5-flash-lite"]);
+  });
+
+  it("a blank override counts as unset", async () => {
+    process.env.AI_GATEWAY_MODEL = " ";
+    process.env.AI_GATEWAY_MODEL_CONTEXT = "";
+    const fetchSpy = vi.fn().mockResolvedValue(completion("{}"));
+    vi.stubGlobal("fetch", fetchSpy);
+    await requestStructuredJsonFromLlm({ auth: TEST_AUTH, route: "context", systemPrompt: "s", userPayload: {} });
+    expect(sentBody(fetchSpy).model).toBe("anthropic/claude-haiku-5.5");
   });
 });

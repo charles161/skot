@@ -24,6 +24,7 @@ const SYSTEM_PROMPT =
 async function enrichWithLlm(auth: GatewayAuth, request: EnrichRequest): Promise<{ findings: MoveFinding[]; model: string; latencyMs: number } | null> {
   const result = await requestStructuredJsonFromLlm({
     auth,
+    route: "moves",
     systemPrompt: SYSTEM_PROMPT,
     maxTokens: 700,
     timeoutMs: ENRICH_SERVER_TIMEOUT_MS,

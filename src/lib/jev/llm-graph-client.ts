@@ -33,6 +33,24 @@ import {
  */
 export const AI_GATEWAY_CHAT_COMPLETIONS_URL = "https://ai-gateway.vercel.sh/v1/chat/completions";
 export const DEFAULT_AI_GATEWAY_MODEL = "openai/gpt-4.1-mini";
+const HAIKU_MODEL = "anthropic/claude-haiku-5.5";
+
+/**
+ * The model each gateway route uses, pinned by a unit test. Haiku won the 22 Nov 2026 model eval on the short-output
+ * routes; next_options, Fork and generate_graph stay on gpt-4.1-mini because Haiku overruns their length caps.
+ * Env overrides: AI_GATEWAY_MODEL_<ROUTE> (e.g. AI_GATEWAY_MODEL_MORPH) for one route, AI_GATEWAY_MODEL for all.
+ */
+export const LLM_ROUTE_MODELS = {
+  context: HAIKU_MODEL,
+  practice_review: HAIKU_MODEL,
+  moves: HAIKU_MODEL,
+  morph: HAIKU_MODEL,
+  next_options: DEFAULT_AI_GATEWAY_MODEL,
+  fork: DEFAULT_AI_GATEWAY_MODEL,
+  generate_graph: DEFAULT_AI_GATEWAY_MODEL,
+} as const satisfies Record<string, string>;
+
+export type LlmRoute = keyof typeof LLM_ROUTE_MODELS;
 const LLM_TIMEOUT_MS = 6500;
 /** Three full graphs with trade-offs take gpt-4.1-mini ~8-15 s through the gateway. */
 const FORK_TIMEOUT_MS = 25000;
@@ -76,8 +94,12 @@ export function resolveGatewayAuth(source: {
   return null;
 }
 
-function gatewayModel(): string {
-  return process.env.AI_GATEWAY_MODEL?.trim() || DEFAULT_AI_GATEWAY_MODEL;
+function gatewayModel(route: LlmRoute): string {
+  return (
+    process.env[`AI_GATEWAY_MODEL_${route.toUpperCase()}`]?.trim() ||
+    process.env.AI_GATEWAY_MODEL?.trim() ||
+    LLM_ROUTE_MODELS[route]
+  );
 }
 
 const chatCompletionSchema = z.object({
@@ -101,6 +123,7 @@ const chatCompletionSchema = z.object({
 
 export async function requestStructuredJsonFromLlm(params: {
   auth: GatewayAuth;
+  route: LlmRoute;
   systemPrompt: string;
   userPayload: Record<string, unknown>;
   timeoutMs?: number;
@@ -111,7 +134,7 @@ export async function requestStructuredJsonFromLlm(params: {
   latencyMs: number;
   inputTokens?: number;
 } | null> {
-  const model = gatewayModel();
+  const model = gatewayModel(params.route);
   const startedAt = performance.now();
   const elapsed = () => Math.max(1, Math.round(performance.now() - startedAt));
 
@@ -127,6 +150,9 @@ export async function requestStructuredJsonFromLlm(params: {
       body: JSON.stringify({
         model,
         temperature: 0.25,
+        // Every route is a capped JSON answer: hidden reasoning would spend max_tokens before the JSON starts.
+        // The gateway accepts this for non-reasoning models too (gpt-4.1-mini ignores it).
+        reasoning_effort: "none",
         ...(params.maxTokens ? { max_tokens: params.maxTokens } : {}),
         response_format: { type: "json_object" },
         messages: [
@@ -212,6 +238,7 @@ export async function generateSemanticGraphWithLlm(params: {
 } | null> {
   const result = await requestStructuredJsonFromLlm({
     auth: params.auth,
+    route: "generate_graph",
     systemPrompt: GRAPH_SYSTEM_PROMPT,
     userPayload: {
       task: "generate_semantic_graph",
@@ -260,6 +287,7 @@ export async function generateForkTakesWithLlm(params: {
 } | null> {
   const result = await requestStructuredJsonFromLlm({
     auth: params.auth,
+    route: "fork",
     systemPrompt: params.constraint ? FORK_CONSTRAINT_PROMPT : FORK_SYSTEM_PROMPT,
     userPayload: {
       task: "fork_architecture",
@@ -334,6 +362,7 @@ export async function generateMorphSpecWithLlm(params: {
 } | null> {
   const result = await requestStructuredJsonFromLlm({
     auth: params.auth,
+    route: "morph",
     systemPrompt:
       'Return ONLY valid JSON matching {"summary":string,"actors":[{"id":string,"label":string,"kind"?:"node"|"database"|"queue"|"cache"|"lb"|"blob"|"external"|"actor"|"class"|"ellipse","tone"?:"ink"|"terracotta"|"cobalt"|"teal"|"ochre"|"plum"|"slate"}],"messages":[{"id":string,"from":string,"to":string,"label":string,"order":number,"async"?:boolean,"isReturn"?:boolean}],"fragments"?:[{"id":string,"operator":"alt"|"loop"|"opt","guard":string,"fromOrder":number,"toOrder":number,"elseFromOrder"?:number,"elseGuard"?:string}],"steps":[{"id":string,"label":string,"kind":"start"|"process"|"decision"|"end","tone"?:string,"branches"?:[{"to":string,"label"?:string,"fallback"?:boolean}]}],"states":[{"id":string,"label":string,"initial"?:boolean,"terminal"?:boolean,"tone"?:string}],"transitions":[{"id":string,"from":string,"to":string,"event":string,"guard"?:string,"action"?:string,"fallback"?:boolean}],"entities":[{"id":string,"name":string,"attributes":string[],"tone"?:string}],"relations":[{"id":string,"from":string,"to":string,"cardinality":string,"label"?:string}]}. UML rules: messages are exactly the arrows drawn between selected nodes, one message per arrow; never add a message, a return or a participant that is not drawn (isReturn only marks a drawn arrow back to its caller); fragments cover message orders fromOrder..toOrder (only alt sets elseFromOrder/elseGuard, inside that range); transition guard is the condition without brackets, action is the effect; entity attributes are rows like "id uuid PK" and "user_id uuid FK"; cardinality is "1:1", "1:N", "N:1" or "N:M". Keep semantic IDs aligned with the selected nodes so round-tripping preserves edits.',
     userPayload: {
@@ -397,6 +426,7 @@ export async function proposeContextNodesWithLlm(params: {
 } | null> {
   const result = await requestStructuredJsonFromLlm({
     auth: params.auth,
+    route: "context",
     timeoutMs: CONTEXT_TIMEOUT_MS,
     maxTokens: 200,
     systemPrompt:
@@ -457,6 +487,7 @@ export async function generatePracticeReviewWithLlm(params: {
   if (!prompt) return null;
   const result = await requestStructuredJsonFromLlm({
     auth: params.auth,
+    route: "practice_review",
     maxTokens: 700,
     systemPrompt: `You are a senior system-design interviewer reviewing a candidate's whiteboard. Return ONLY JSON {"comments":[{"anchorId":string|null,"text":string}]} with 2 to ${MAX_COMMENTS} comments, each under ${MAX_COMMENT_CHARS} characters. anchorId is the id of the board node the comment is about (only ids from boardGraph.nodes), or null when something is missing from the board. Ask pointed questions and name concrete gaps; do not draw or hand over the full answer, and do not give a score. Keep the rule-based comments' intent; you may rephrase them, merge them or add sharper ones grounded in the board.`,
     userPayload: {
@@ -541,6 +572,7 @@ export async function proposeOptionGraphsWithLlm(params: {
 }): Promise<{ graphs: { cluster?: OptionGraph; full?: OptionGraph }; model: string; latencyMs: number } | null> {
   const result = await requestStructuredJsonFromLlm({
     auth: params.auth,
+    route: "next_options",
     timeoutMs: 5000,
     maxTokens: 900,
     systemPrompt: OPTION_GRAPHS_PROMPT,
