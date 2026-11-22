@@ -960,12 +960,15 @@ function materialize(draft: Draft, ctx: Context): Materialized {
     return resolved.get(key) ?? null;
   };
 
+  // A suggestion never adds a second arrow between two nodes. A flow the user typed is drawn as typed: its
+  // direction is theirs, so "queue -> web" is a new arrow even when Web -> Queue is there.
+  const asTyped = Boolean(ctx.typedKeys);
   const linkedOnBoard = (a: string, b: string) =>
-    elements.some((e) => e.kind === "arrow" && ((e.fromId === a && e.toId === b) || (e.fromId === b && e.toId === a)));
+    elements.some((e) => e.kind === "arrow" && ((e.fromId === a && e.toId === b) || (!asTyped && e.fromId === b && e.toId === a)));
   const edges: Array<{ from: string; to: string; label?: string; dashed?: boolean }> = [];
   const addEdge = (from: string, to: string, label?: string, dashed?: boolean) => {
     if (from === to || linkedOnBoard(from, to)) return;
-    if (edges.some((e) => (e.from === from && e.to === to) || (e.from === to && e.to === from))) return;
+    if (edges.some((e) => (e.from === from && e.to === to) || (!asTyped && e.from === to && e.to === from))) return;
     edges.push({ from, to, label, dashed });
   };
   for (const e of draft.edges) {
@@ -1399,6 +1402,8 @@ export function buildAfterCreateOptions(input: {
   anchorIds?: string[];
   /** The user had selected the anchors themselves. */
   userPicked?: boolean;
+  /** False when Enter will not take the first connection (one was just accepted, or no node was added). */
+  offerEnter?: boolean;
   viewportCenter?: Point;
 }): NextOptionsResult | null {
   const next = buildNextOptions({ elements: input.elements, subjectId: input.nodeId, viewportCenter: input.viewportCenter });
@@ -1410,8 +1415,8 @@ export function buildAfterCreateOptions(input: {
   return {
     intent: {
       kind: "domain_continue",
-      headline: `Connect ${node.label || node.kind}?`,
-      detail: "Enter accepts, typing skips",
+      headline: input.offerEnter === false ? `More connections for ${node.label || node.kind}` : `Connect ${node.label || node.kind}?`,
+      detail: input.offerEnter === false ? "Tab picks one, typing skips" : "Enter accepts, typing skips",
       subjectId: node.id,
       relatedIds: [],
       timestamp: Date.now(),

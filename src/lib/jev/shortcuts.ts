@@ -49,7 +49,10 @@ export function toolForShortcut(e: KeyLike): ToolType | null {
   return letter ? KEY_TO_TOOL.get(letter) ?? null : null;
 }
 
-/** A bare printable letter (any script), no Ctrl / Cmd / Alt: text for the Thought Bar, not a command. */
+/**
+ * A bare printable letter or digit (any script), no Ctrl / Cmd / Alt: text for the Thought Bar, not a command.
+ * Digits count: a name may start with one ("2fa service"), and no bare key is a shortcut.
+ */
 export function isTypedLetter(e: KeyLike): boolean {
-  return !e.altKey && !e.ctrlKey && !e.metaKey && e.key.length === 1 && /\p{L}/u.test(e.key);
+  return !e.altKey && !e.ctrlKey && !e.metaKey && e.key.length === 1 && /[\p{L}\p{N}]/u.test(e.key);
 }

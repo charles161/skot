@@ -88,7 +88,8 @@ interface JevCanvasProps {
     }
   ) => JevElement[];
   onElementMoved: (moved: JevElement, dragStart: ElementBox) => void;
-  onElementCreated: (created: JevElement) => void;
+  /** `via: "arrow"`: an arrow was drawn onto this existing element; no element was added. */
+  onElementCreated: (created: JevElement, via?: "arrow") => void;
   onStrokeCreated: (stroke: JevElement) => void;
   onElementLabelEdited: (edited: JevElement) => void;
   onCursorMove?: (worldPoint: Point) => void;
@@ -921,7 +922,7 @@ export function JevCanvas({
           };
           onElementsChange((prev) => [...prev, arrow], { recordUndo: true });
           const targetEl = elementsById.get(toId);
-          if (targetEl) onElementCreated(targetEl);
+          if (targetEl) onElementCreated(targetEl, "arrow");
         } else if (fromId && !toId) {
           // Dropping an arrow on open space spawns a brand new connected node right there!
           const newNodeId = uid("el");

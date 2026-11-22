@@ -12,6 +12,7 @@ type Timer = ReturnType<typeof setTimeout>;
 
 export class SettledAsk<T> {
   private readonly delayMs: number;
+  private readonly minWaitMs: number;
   private readonly send: (job: T) => void;
   private readonly now: () => number;
   private waiting: T | null = null;
@@ -19,8 +20,10 @@ export class SettledAsk<T> {
   private lastActivity = Number.NEGATIVE_INFINITY;
   private timer: Timer | null = null;
 
-  constructor(opts: { delayMs?: number; send: (job: T) => void; now?: () => number }) {
+  /** `minWaitMs`: the shortest wait after a request, even on a board that settled long ago. */
+  constructor(opts: { delayMs?: number; minWaitMs?: number; send: (job: T) => void; now?: () => number }) {
     this.delayMs = opts.delayMs ?? ASK_SETTLE_MS;
+    this.minWaitMs = opts.minWaitMs ?? 0;
     this.send = opts.send;
     this.now = opts.now ?? Date.now;
   }
@@ -51,11 +54,6 @@ export class SettledAsk<T> {
     this.clearTimer();
   }
 
-  /** Keeps the waiting request only while it is still about what is on screen. */
-  dropUnless(keep: (job: T) => boolean): void {
-    if (this.waiting !== null && !keep(this.waiting)) this.cancel();
-  }
-
   get pending(): boolean {
     return this.waiting !== null;
   }
@@ -63,7 +61,7 @@ export class SettledAsk<T> {
   private arm(): void {
     this.clearTimer();
     if (this.waiting === null || this.busy) return;
-    const wait = Math.max(0, this.lastActivity + this.delayMs - this.now());
+    const wait = Math.max(this.minWaitMs, this.lastActivity + this.delayMs - this.now());
     this.timer = setTimeout(() => {
       this.timer = null;
       const job = this.waiting;

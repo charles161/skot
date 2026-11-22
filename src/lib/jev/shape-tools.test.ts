@@ -88,7 +88,9 @@ describe("keyboard: bare letters are text, Alt+letter is a tool", () => {
 
   it("letters of any script are text for the Thought Bar; digits, symbols and chords are not", () => {
     for (const c of ["a", "Z", "é", "ñ", "日", "ж"]) expect(isTypedLetter(key(c, "KeyA"))).toBe(true);
-    for (const c of ["1", "/", " ", "[", "Enter", "Tab", "Backspace", "F2"]) expect(isTypedLetter(key(c, "X"))).toBe(false);
+    // Judge A, round 4: "2" on the board picked suggestion 2 while "2" in the bar typed. A digit is text everywhere.
+    for (const c of ["1", "2", "9", "0"]) expect(isTypedLetter(key(c, "Digit1"))).toBe(true);
+    for (const c of ["/", " ", "[", "Enter", "Tab", "Backspace", "F2"]) expect(isTypedLetter(key(c, "X"))).toBe(false);
     expect(isTypedLetter(key("a", "KeyA", { ctrlKey: true }))).toBe(false);
     expect(isTypedLetter(key("a", "KeyA", { metaKey: true }))).toBe(false);
     expect(isTypedLetter(key("å", "KeyA", { altKey: true }))).toBe(false);

@@ -88,6 +88,8 @@ export interface ArrowGeometry {
 
 /** How close an arrow may pass a node it does not connect before it is routed around it. */
 export const ARROW_CLEARANCE = 10;
+/** The closest an arrow squeezing through a narrow gap may pass a node. */
+const ARROW_CLEARANCE_TIGHT = 6;
 /** How far the curve's control point may be pushed off the straight line, smallest first. */
 const ROUTE_OFFSETS = [70, 100, 130, 160, 190, 220, 250, 280, 320, 370, 430, 520];
 /** Where along the arrow the bend sits (0 = one end, 1 = the other). */
@@ -102,25 +104,20 @@ function quadraticAt(g: ArrowGeometry, t: number): Point {
   return { x: a * g.start.x + b * g.control.x + c * g.end.x, y: a * g.start.y + b * g.control.y + c * g.end.y };
 }
 
-/** True when the curve passes within ARROW_CLEARANCE of one of the rectangles. */
-function curveHits(g: ArrowGeometry, all: Rect[]): boolean {
+/** True when the curve passes within `clearance` of one of the rectangles. */
+function curveHits(g: ArrowGeometry, all: Rect[], clearance = ARROW_CLEARANCE): boolean {
   // The curve stays inside the triangle of its three points: only rectangles reaching into that box can be hit.
-  const minX = Math.min(g.start.x, g.control.x, g.end.x) - ARROW_CLEARANCE;
-  const maxX = Math.max(g.start.x, g.control.x, g.end.x) + ARROW_CLEARANCE;
-  const minY = Math.min(g.start.y, g.control.y, g.end.y) - ARROW_CLEARANCE;
-  const maxY = Math.max(g.start.y, g.control.y, g.end.y) + ARROW_CLEARANCE;
+  const minX = Math.min(g.start.x, g.control.x, g.end.x) - clearance;
+  const maxX = Math.max(g.start.x, g.control.x, g.end.x) + clearance;
+  const minY = Math.min(g.start.y, g.control.y, g.end.y) - clearance;
+  const maxY = Math.max(g.start.y, g.control.y, g.end.y) + clearance;
   const rects = all.filter((r) => r.x < maxX && r.x + r.width > minX && r.y < maxY && r.y + r.height > minY);
   if (rects.length === 0) return false;
   const samples = Math.min(96, Math.max(24, Math.ceil(Math.hypot(g.end.x - g.start.x, g.end.y - g.start.y) / 16)));
   for (let i = 1; i < samples; i += 1) {
     const p = quadraticAt(g, i / samples);
     for (const r of rects) {
-      if (
-        p.x > r.x - ARROW_CLEARANCE &&
-        p.x < r.x + r.width + ARROW_CLEARANCE &&
-        p.y > r.y - ARROW_CLEARANCE &&
-        p.y < r.y + r.height + ARROW_CLEARANCE
-      ) {
+      if (p.x > r.x - clearance && p.x < r.x + r.width + clearance && p.y > r.y - clearance && p.y < r.y + r.height + clearance) {
         return true;
       }
     }
@@ -170,6 +167,31 @@ function routeAroundNodes(
   // Most arrows have nothing in their way: that is settled with the few nodes beside the straight line.
   if (!curveHits(base, nodesWithin(40 + ARROW_CLEARANCE))) return base;
   const near = nodesWithin(offsets[offsets.length - 1] + ARROW_CLEARANCE);
+  // The search below depends only on the two nodes and the nodes around them: a board where nothing near this
+  // arrow changed (another node is being dragged, say) reuses the answer.
+  const key = [fromEl, toEl]
+    .map((el) => `${el.kind},${el.x},${el.y},${el.width},${el.height}`)
+    .concat(near.map((r) => `${r.x},${r.y},${r.width},${r.height}`))
+    .join("|");
+  const known = routeCache.get(key);
+  if (known) return known;
+  const routed = searchRoute(base, fromEl, toEl, near, { p, dx, dy, dist, swap, offsets });
+  if (routeCache.size >= ROUTE_CACHE_SIZE) routeCache.clear();
+  routeCache.set(key, routed);
+  return routed;
+}
+
+const ROUTE_CACHE_SIZE = 4000;
+const routeCache = new Map<string, ArrowGeometry>();
+
+function searchRoute(
+  base: ArrowGeometry,
+  fromEl: JevElement,
+  toEl: JevElement,
+  near: Rect[],
+  chord: { p: Point; dx: number; dy: number; dist: number; swap: boolean; offsets: number[] }
+): ArrowGeometry {
+  const { p, dx, dy, dist, swap, offsets } = chord;
 
   // Which side the nodes in the way lie on: positive is the side the normal points to.
   const nx = -dy / dist;
@@ -190,7 +212,47 @@ function routeAroundNodes(
       }
     }
   }
-  return base;
+  return routeByElbow(fromEl, toEl, swap, near) ?? base;
+}
+
+/** The eight places an elbow may leave or reach a node: the middle of each side and each corner, just outside it. */
+function anchorsOf(el: JevElement): Point[] {
+  const gap = 4;
+  const xs = [el.x - gap, el.x + el.width / 2, el.x + el.width + gap];
+  const ys = [el.y - gap, el.y + el.height / 2, el.y + el.height + gap];
+  const out: Point[] = [];
+  for (const x of xs) for (const y of ys) if (x !== xs[1] || y !== ys[1]) out.push({ x, y });
+  return out;
+}
+
+/**
+ * When no single arc gets round (both columns between two nodes are full, say), the arrow takes a rounded
+ * elbow instead: out of one node, along the gap beside the nodes in the way, and into the other from its side.
+ * The shortest elbow that clears every node, the two it joins included, wins.
+ */
+function routeByElbow(fromEl: JevElement, toEl: JevElement, swap: boolean, near: Rect[]): ArrowGeometry | null {
+  // Built for the same pair of nodes in the same order whichever way the arrow points, then turned round.
+  const a = swap ? toEl : fromEl;
+  const b = swap ? fromEl : toEl;
+  const own: Rect[] = [a, b].map((el) => ({ x: el.x, y: el.y, width: el.width, height: el.height }));
+  const candidates: Array<{ geom: ArrowGeometry; length: number }> = [];
+  for (const start of anchorsOf(a)) {
+    for (const end of anchorsOf(b)) {
+      for (const control of [{ x: start.x, y: end.y }, { x: end.x, y: start.y }]) {
+        const length = Math.hypot(control.x - start.x, control.y - start.y) + Math.hypot(end.x - control.x, end.y - control.y);
+        candidates.push({ geom: { start, end, control }, length });
+      }
+    }
+  }
+  candidates.sort((u, v) => u.length - v.length);
+  // A gap between two columns can be narrower than twice the usual clearance: then a closer pass is allowed.
+  for (const clearance of [ARROW_CLEARANCE, ARROW_CLEARANCE_TIGHT]) {
+    for (const { geom } of candidates) {
+      if (curveHits(geom, own, 2) || curveHits(geom, near, clearance)) continue;
+      return swap ? { start: geom.end, end: geom.start, control: geom.control } : geom;
+    }
+  }
+  return null;
 }
 
 /**

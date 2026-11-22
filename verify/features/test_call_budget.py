@@ -160,6 +160,13 @@ def test_call_budget(page, skot, evidence):
             page.keyboard.type(name, delay=25)
             page.keyboard.press("Enter")
     one_call_after("three names typed in a row", three_names, "CDN")
+
+    # Judge A, round 4: the same with no pause at all between keys made no call.
+    def three_more_at_once():
+        for name in ("alpha", "beta", "gamma"):
+            page.keyboard.type(name, delay=0)
+            page.keyboard.press("Enter")
+    one_call_after("three names typed with no pause at all", three_more_at_once, "Gamma")
     shot(page, evidence, "call-budget", "3-settled-adds")
 
     evidence.note(calls=[(c["mode"], c["subject"]) for c in served])

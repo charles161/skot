@@ -153,6 +153,14 @@ features:
     sources:
       - src/lib/jev/geometry.ts
 
+  - id: flow-both-ways
+    title: "A typed flow is drawn as typed, the way back included (web -> queue, then queue -> web gives two arrows);
+      a flow that is already on the board adds nothing and says so on screen"
+    check: flow-both-ways
+    sources:
+      - src/lib/jev/next-options.ts
+      - src/components/jev/JevWorkspace.tsx
+
   - id: call-budget
     title: "Drawing does not drain the AI budget: nothing is asked while a shape, label or arrow is in progress; a
       settled add, arrow, click or drag costs one call; a 6-node, 5-arrow board drawn quickly costs at most 3, and

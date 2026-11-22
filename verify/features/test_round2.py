@@ -108,6 +108,25 @@ def test_type_anywhere(page, skot, evidence):
     assert active_tool(page).startswith("Zone Frame tool (Alt+Z)"), active_tool(page)
     page.keyboard.press("Alt+s")
 
+    # Judge B, round 4: after typing a node the caret is in the (empty) bar, and there Alt+A did nothing until
+    # Esc or a click on the board. With the bar empty Alt+letter picks the tool; with text in it the keys are text.
+    bar_of(page).click()
+    assert bar_of(page).input_value() == "" and bar_of(page).evaluate("el => el === document.activeElement")
+    page.keyboard.press("Alt+a")
+    assert active_tool(page).startswith("Smart Arrow tool") or "Arrow" in active_tool(page), \
+        "Alt+A with the caret in the empty bar must pick the arrow tool: %s" % active_tool(page)
+    page.keyboard.press("Alt+r")
+    assert "Box" in active_tool(page) or "Rectangle" in active_tool(page), active_tool(page)
+    page.keyboard.press("Alt+s")
+    assert active_tool(page).startswith("Select tool"), active_tool(page)
+    page.keyboard.type("caf")
+    page.keyboard.press("Alt+r")
+    assert active_tool(page).startswith("Select tool") and bar_of(page).input_value().startswith("caf"), \
+        "with a name half typed, Alt+letter is left to the keyboard: %s %r" % (active_tool(page), bar_of(page).input_value())
+    for _ in range(4):
+        page.keyboard.press("Backspace")
+    page.keyboard.press("Escape")
+
     # Fork It: Alt+F on a selection, and its button. A bare f is a letter.
     click_node(skot, "App")
     page.keyboard.type("f")

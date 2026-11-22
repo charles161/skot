@@ -85,13 +85,15 @@ describe("SettledAsk", () => {
     expect(ask.pending).toBe(false);
   });
 
-  it("a request about suggestions that are no longer on screen is dropped", () => {
-    act("options for app");
-    ask.dropUnless((job) => job === "options for app");
-    expect(ask.pending).toBe(true);
-    ask.dropUnless((job) => job === "what the user typed next");
-    vi.advanceTimersByTime(5 * ASK_SETTLE_MS);
+  it("waits at least the minimum even when the board settled long ago", () => {
+    const slow = new SettledAsk<string>({ minWaitMs: 60, send: (job) => sent.push(job) });
+    slow.touch();
+    vi.advanceTimersByTime(5000);
+    slow.request("saved board");
+    vi.advanceTimersByTime(59);
     expect(sent).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(sent).toEqual(["saved board"]);
   });
 
   it("a request made long after the last press is sent at once (the board already settled)", () => {
@@ -132,14 +134,16 @@ describe("rank_actions wiring", () => {
   it("the workspace posts rank_actions from one function, and only the settled gate calls it", () => {
     expect(workspace.match(/mode: "rank_actions"/g)).toHaveLength(1);
     expect(workspace.match(/\brankWithTypeSafeJev\(/g) ?? [], "only the SettledAsk send callback sends").toHaveLength(1);
-    expect(workspace).toMatch(
-      /new SettledAsk<RankJob>\(\{\s*send: \(job\) => void rankWithTypeSafeJev\(job\.intent, job\.els, job\.pool, job\.opts\)/
-    );
+    expect(workspace).toMatch(/new SettledAsk<RankJob>\(\{/);
   });
 
-  it("every presenter asks through the gate, and replaced suggestions drop the waiting request", () => {
+  // Judge A, round 4: three names typed with no pause at all made no AI call. The check for "are these still
+  // the suggestions on screen" ran from a stale render and dropped the newest request. It is made when the
+  // request is sent, against the list on screen then.
+  it("every presenter asks through the gate, and a request about replaced suggestions is not sent", () => {
     expect(workspace.match(/\baskWhenSettled\(/g)?.length).toBeGreaterThanOrEqual(2);
-    expect(workspace).toMatch(/rankAskRef\.current\?\.dropUnless\(\(job\) => job\.shown === predictions\)/);
+    expect(workspace).toMatch(/if \(shownPredictionsRef\.current !== job\.shown\) return;\s*void rankWithTypeSafeJev\(job\.intent, job\.els, job\.pool, job\.opts\)/);
+    expect(workspace).not.toMatch(/dropUnless/);
   });
 
   it("a key or pointer press, and anything in progress, reaches the gate", () => {

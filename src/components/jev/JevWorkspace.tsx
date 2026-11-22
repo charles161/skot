@@ -427,6 +427,10 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   const [telemetry, setTelemetry] = useState<JevTelemetry | null>(null);
   const decideAbortRef = useRef<AbortController | null>(null);
   const rankAskRef = useRef<SettledAsk<RankJob> | null>(null);
+  /** The suggestion list on screen as of the last render. */
+  const shownPredictionsRef = useRef<PredictedAction[]>([]);
+  /** The node last drawn with a shape tool, until it is named or something else happens. */
+  const toolCreatedIdRef = useRef<string | null>(null);
   const showSelectionPredictionsRef = useRef<(key: string, signal: AbortSignal) => void>(() => {});
   const selectionTriggerRef = useRef<SelectionSuggestTrigger | null>(null);
 
@@ -684,7 +688,13 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   // The one way a rank_actions request leaves the browser: after the board settles, and only the latest one.
   useEffect(() => {
     const ask = new SettledAsk<RankJob>({
-      send: (job) => void rankWithTypeSafeJev(job.intent, job.els, job.pool, job.opts),
+      // Long enough for the list just shown to be the one on screen when the request is checked below.
+      minWaitMs: 60,
+      send: (job) => {
+        // The suggestions this request is about were replaced: asking about them now would be wasted.
+        if (shownPredictionsRef.current !== job.shown) return;
+        void rankWithTypeSafeJev(job.intent, job.els, job.pool, job.opts);
+      },
     });
     rankAskRef.current = ask;
     const touch = () => ask.touch();
@@ -705,7 +715,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   }, [canvasInteracting, tool, forkSession]);
 
   useEffect(() => {
-    rankAskRef.current?.dropUnless((job) => job.shown === predictions);
+    shownPredictionsRef.current = predictions;
   }, [predictions]);
 
   /** Asks the AI about the suggestions just shown, once the board settles. `shown` is the list on screen. */
@@ -724,6 +734,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   );
 
   const boardNotice = useBoardNotice();
+  const showBoardNotice = boardNotice.show;
   const importPending = useImportFragment(boardNotice.show);
   const boardFile = useBoardFileActions(
     () => ({ elements: elementsRef.current, boardTitle: boardTitleRef.current }),
@@ -1363,7 +1374,14 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     (nodeId: string, anchorIds: string[], els: JevElement[], userPicked = false, offerEnter = true) => {
       lastTouchedIdRef.current = nodeId;
       if (aiQuietRef.current) return;
-      const result = buildAfterCreateOptions({ elements: els, nodeId, anchorIds, userPicked, viewportCenter: viewportCenterRef.current });
+      const result = buildAfterCreateOptions({
+        elements: els,
+        nodeId,
+        anchorIds,
+        userPicked,
+        offerEnter,
+        viewportCenter: viewportCenterRef.current,
+      });
       if (!result) {
         setPredictions([]);
         setIntent(null);
@@ -1432,17 +1450,20 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   );
 
   const handleElementCreated = useCallback(
-    (created: JevElement) => {
+    (created: JevElement, via?: "arrow") => {
       const latest = elementsRef.current.some((e) => e.id === created.id)
         ? elementsRef.current
         : [...elementsRef.current, created];
+      // An arrow drawn onto an existing node adds no node: its other connections are offered, never to Enter.
+      const drewArrow = via === "arrow";
       pushEditDelta({
         op: "add",
         elementIds: [created.id],
         labels: [created.label],
-        summary: `Added ${created.label || created.kind}`,
+        summary: `${drewArrow ? "Connected" : "Added"} ${created.label || created.kind}`,
       });
-      presentAfterCreate(created.id, [], latest);
+      toolCreatedIdRef.current = drewArrow ? null : created.id;
+      presentAfterCreate(created.id, [], latest, false, !drewArrow);
     },
     [presentAfterCreate, pushEditDelta]
   );
@@ -1477,8 +1498,12 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       });
       selectionTriggerRef.current?.consume();
       const wired = latest.some((e) => e.kind === "arrow" && (e.fromId === edited.id || e.toId === edited.id));
+      // Naming a node just drawn with a tool finishes adding it: Enter may take its connection. Renaming an
+      // older node adds nothing.
+      const justDrawn = toolCreatedIdRef.current === edited.id;
+      toolCreatedIdRef.current = null;
       if (wired) presentSubjectOptions(edited.id, latest);
-      else presentAfterCreate(edited.id, [], latest);
+      else presentAfterCreate(edited.id, [], latest, false, justDrawn);
     },
     [presentSubjectOptions, presentAfterCreate, pushEditDelta]
   );
@@ -1564,6 +1589,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         } else {
           setThoughtPrompt("");
           announceStatus("That flow is already on the board");
+          showBoardNotice({ tone: "info", text: "That flow is already on the board" });
         }
         return;
       }
@@ -1593,6 +1619,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       pushEditDelta,
       ensureElementsVisible,
       announceStatus,
+      showBoardNotice,
       presentAfterCreate,
     ]
   );
@@ -2479,8 +2506,11 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
         target?.isContentEditable;
+      // The caret rests in the Thought Bar after every typed node. While the bar is empty Alt+letter still
+      // picks a tool (or Fork It); with a name half typed those keys belong to the keyboard.
+      const fromEmptyBar = target === thoughtInputRef.current && thoughtInputRef.current?.value === "" && altLetter(e) !== null;
 
-      if (inInput) return;
+      if (inInput && !fromEmptyBar) return;
 
       // "/" focuses the Thought Bar
       if (e.key === "/" && !aiQuiet) {
@@ -2489,9 +2519,11 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         return;
       }
 
-      // A letter typed anywhere on the board is the start of a node name: it goes to the Thought Bar, and
-      // the node will land beside whatever is selected. (Tools are on Alt+letter.)
-      if (!aiQuiet && isTypedLetter(e) && !document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) {
+      // A letter or digit typed anywhere on the board is the start of a node name: it goes to the Thought Bar,
+      // and the node will land beside whatever is selected. (Tools are on Alt+letter. Only an open Fork It
+      // panel keeps 1 / 2 / 3 for its three takes.)
+      const forkTakeKey = Boolean(forkSession) && /^[1-3]$/.test(e.key);
+      if (!aiQuiet && !forkTakeKey && isTypedLetter(e) && !document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) {
         e.preventDefault();
         typeIntoThoughtBar(e.key);
         return;
@@ -2518,6 +2550,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         setTool(shortcutTool);
         return;
       }
+      if (fromEmptyBar) return;
 
       // Fork pressure step: 1-5 pick a pressure, Enter skips to the classic takes, Esc cancels
       if (forkSession?.phase === "pressure") {
@@ -2644,26 +2677,6 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
           );
         }
         return;
-      }
-
-      // 1 / 2 / 3 / 4 quick select prediction
-      if (
-        (e.key === "1" || e.key === "2" || e.key === "3" || e.key === "4") &&
-        predictions.length > 0 &&
-        !e.metaKey &&
-        !e.ctrlKey
-      ) {
-        const idx = Number(e.key) - 1;
-        if (idx < predictions.length) {
-          e.preventDefault();
-          if (activePredIdx === idx) {
-            applyPrediction(idx);
-          } else {
-            optionsTouchedRef.current = true;
-            setActivePredIdx(idx);
-          }
-          return;
-        }
       }
 
       if (e.key === "Escape") {

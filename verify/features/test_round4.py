@@ -85,6 +85,11 @@ def test_enter_needs_pick(page, skot, evidence, ai):
     assert len([e for e in els if is_shape(e)]) == 3, "Enter after the connection added nodes: %s" % labels(skot)
     assert len(arrows_named(els)) == len(before) + 1, "Enter after the connection added more arrows: %s" % arrows_named(els)
 
+    # Judge A, round 4: after "Enter, Enter" the pill above the panel still said "Enter accepts" with nothing
+    # highlighted. The pill must not promise a key that does nothing.
+    pill = " ".join(page.locator(SUGGESTIONS).inner_text().split())
+    assert "Enter accepts" not in pill, "nothing is highlighted, yet the panel says Enter accepts: %r" % pill[:160]
+
     # 3b. A node that could connect to several others: Enter still takes one connection only.
     type_enter(page, "auth service")
     type_enter(page, "metrics")
@@ -98,6 +103,9 @@ def test_enter_needs_pick(page, skot, evidence, ai):
         page.wait_for_timeout(400)
     page.wait_for_timeout(500)
     shot(page, evidence, "enter-needs-pick", "3b-one-connection-only")
+    pill = " ".join(page.locator(SUGGESTIONS).inner_text().split())
+    assert not highlighted(page) and "Enter accepts" not in pill, \
+        "Metrics has more connections on offer and none highlighted, yet the panel says Enter accepts: %r" % pill[:160]
     els = skot.elements()
     assert len(arrows_named(els)) == n_arrows + 1, \
         "four Enters must accept one connection, not chain through the rest: %s" % arrows_named(els)[n_arrows:]
@@ -117,6 +125,33 @@ def test_enter_needs_pick(page, skot, evidence, ai):
     els = skot.elements()
     assert len([e for e in els if is_shape(e)]) == 5 and len(arrows_named(els)) == n_arrows, \
         "Enter after a click added something: %s %s" % (labels(skot), arrows_named(els))
+
+    # 5. Judge A, round 4: after drawing an arrow with the arrow tool, Enter added a second arrow nobody picked
+    # (the target's other connection was highlighted). A drawn arrow adds no node, so nothing is on offer to Enter.
+    skot.clear()
+    n_arrows = len(arrows_named(skot.elements()))
+    skot.connect("App", "Auth Service")
+    page.wait_for_timeout(700)
+    assert not highlighted(page), "after a drawn arrow nothing is highlighted: %s" % highlighted(page)
+    page.keyboard.press("Enter")
+    page.wait_for_timeout(700)
+    page.keyboard.press("Escape")
+    els = skot.elements()
+    shot(page, evidence, "enter-needs-pick", "5-after-drawn-arrow")
+    assert len(arrows_named(els)) == n_arrows + 1, "Enter after a drawn arrow added another arrow: %s" % arrows_named(els)
+
+    # 6. Judge A, round 4: the options carry numbers, but "2" typed a 2. A digit is text like a letter, in the bar
+    # and on the board: a name may start with one ("2fa service"), and no bare key is a shortcut.
+    skot.clear()
+    skot.click_element("Postgres")
+    page.wait_for_function("s => !!document.querySelector(s + ' button[aria-pressed]')", arg=SUGGESTIONS, timeout=8000)
+    before_ids = {e["id"] for e in skot.elements()}
+    page.keyboard.type("2fa service", delay=30)
+    assert bar_of(page).input_value() == "2fa service", "digits typed on the board go to the bar with the letters: %r" % bar_of(page).input_value()
+    page.keyboard.press("Enter")
+    els = skot.wait_state(lambda es: len({e["id"] for e in es} - before_ids) == 1, what="the node 2fa service")
+    new = next(e for e in els if e["id"] not in before_ids)
+    assert new["label"].lower() == "2fa service", "the node is named what was typed: %r" % new["label"]
     evidence.note(nodes=labels(skot), arrows=arrows_named(els))
     assert_no_console_errors(evidence)
 
@@ -195,4 +230,39 @@ def test_keystroke_route_removed(page, skot, evidence, base_url):
                             headers={"content-type": "application/json"})
     evidence.note(status=res.status, body=res.text()[:200])
     assert res.status == 400, "next_options must be rejected as an unknown mode, got %d: %s" % (res.status, res.text()[:200])
+
+
+@check("flow-both-ways")
+def test_flow_both_ways(page, skot, evidence):
+    """Judge B, round 4: "web -> queue" then "queue -> web" cleared the bar and drew nothing, with no message.
+    A typed flow is drawn as typed, the way back included; a flow that is already there says so on screen."""
+    page.route("**/api/jev/decide", lambda r: r.fulfill(status=500, content_type="application/json", body='{"error":"off"}'))
+    skot.new_board()
+    bar_of(page).click()
+    page.keyboard.type("web -> queue", delay=25)
+    page.keyboard.press("Enter")
+    els = skot.wait_state(lambda es: arrows_named(es) == [("Web", "Queue")], what="web -> queue")
+    nodes = {e["id"]: (e["x"], e["y"]) for e in els if is_shape(e)}
+
+    page.keyboard.type("queue -> web", delay=25)
+    page.wait_for_timeout(400)
+    preview = ghosts(page)["arrows"]
+    assert len(preview) == 1, "the way back is previewed before Enter: %s" % preview
+    page.keyboard.press("Enter")
+    els = skot.wait_state(lambda es: len(arrows_named(es)) == 2, what="queue -> web drawn as a second arrow")
+    shot(page, evidence, "flow-both-ways", "1-there-and-back")
+    assert sorted(arrows_named(els)) == [("Queue", "Web"), ("Web", "Queue")], arrows_named(els)
+    assert {e["id"]: (e["x"], e["y"]) for e in els if is_shape(e)} == nodes, "the way back must not add or move nodes"
+
+    page.keyboard.type("web -> queue", delay=25)
+    page.keyboard.press("Enter")
+    notice = page.locator('[data-testid="board-notice"]')
+    notice.wait_for(state="visible", timeout=3000)
+    shot(page, evidence, "flow-both-ways", "2-already-there")
+    assert "already on the board" in notice.inner_text(), notice.inner_text()
+    page.wait_for_timeout(500)
+    assert len(arrows_named(skot.elements())) == 2 and bar_of(page).input_value() == "", "a repeated flow adds nothing and clears the bar"
+    evidence.note(arrows=arrows_named(skot.elements()))
+    console = [e for e in evidence.errors() if "/api/jev/decide" not in e["text"] and "500" not in e["text"]]
+    assert not console, console[:4]
 

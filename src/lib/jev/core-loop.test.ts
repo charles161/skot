@@ -718,6 +718,29 @@ describe("the node the AI names from the board", () => {
   });
 });
 
+// Judge B, round 4: "web -> queue" then "queue -> web" cleared the bar and drew nothing.
+describe("a typed flow is drawn as typed, the way back included", () => {
+  const web = el({ id: "web", label: "Web", x: 100, y: 300 });
+  const queue = el({ id: "q", label: "Queue", kind: "queue", x: 400, y: 300 });
+  const there = arrow("a1", "web", "q");
+
+  it("queue -> web on a board with Web -> Queue adds the arrow back and no node", () => {
+    const result = buildNextOptions({ elements: [web, queue, there], text: "queue -> web", viewportCenter: CENTER })!;
+    const added = result.options[0].addElements;
+    expect(added.map((e) => [e.kind, e.fromId, e.toId])).toEqual([["arrow", "q", "web"]]);
+  });
+
+  it("the same flow again adds nothing", () => {
+    const again = buildNextOptions({ elements: [web, queue, there], text: "web -> queue", viewportCenter: CENTER });
+    expect(again?.options[0]?.addElements ?? []).toEqual([]);
+  });
+
+  it("a suggestion still never doubles an arrow between two nodes", () => {
+    const options = connectionOptions({ elements: [web, queue, there], nodeId: "q" });
+    expect(options.filter((o) => o.addElements.some((e) => (e.fromId === "q" && e.toId === "web") || (e.fromId === "web" && e.toId === "q")))).toEqual([]);
+  });
+});
+
 // Charles, 22 Nov (1A): "Enter on the empty bar accepts only a connection of the node just added. Any other
 // suggestion needs Tab first." Before: app, Enter, Enter, Enter added API Gateway and Auth Service.
 describe("what Enter takes on the empty bar", () => {
@@ -744,6 +767,17 @@ describe("what Enter takes on the empty bar", () => {
     expect(steps.length).toBeGreaterThan(0);
     for (const step of steps) expect(isConnectionOf(step, "gw")).toBe(false);
     expect(enterDefaultIndex(steps, "gw")).toBe(NO_OPTION);
+  });
+
+  // Judge A, round 4: after "Enter, Enter" the pill still said "Enter accepts" with nothing highlighted.
+  it("the hint only promises Enter when Enter will take the connection", () => {
+    const third = el({ id: "auth", label: "Auth Service", x: 700, y: 300 });
+    const offered = buildAfterCreateOptions({ elements: [...board, third], nodeId: "gw", viewportCenter: CENTER })!;
+    expect(offered.intent.detail).toMatch(/^Enter accepts/);
+    const after = buildAfterCreateOptions({ elements: [...board, third], nodeId: "gw", offerEnter: false, viewportCenter: CENTER })!;
+    expect(`${after.intent.headline} ${after.intent.detail}`).not.toMatch(/Enter/);
+    expect(after.intent.detail).toMatch(/Tab picks one/);
+    expect(after.options.map((o) => o.title)).toEqual(offered.options.map((o) => o.title));
   });
 
   it("Tab from nothing picks the first suggestion, Shift+Tab the last; then they cycle", () => {
