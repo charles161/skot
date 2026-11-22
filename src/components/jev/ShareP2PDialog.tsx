@@ -55,13 +55,8 @@ export function ShareP2PDialog({
 
   const shareUrl =
     typeof window !== "undefined"
-      ? buildRoomShareUrl(
-          window.location.origin,
-          window.location.pathname,
-          roomId,
-          roomSecret
-        )
-      : `#room=${encodeURIComponent(roomId)}&k=${encodeURIComponent(roomSecret)}`;
+      ? buildRoomShareUrl(window.location.origin, roomId, roomSecret)
+      : "";
 
   const copyShareUrl = async () => {
     try {

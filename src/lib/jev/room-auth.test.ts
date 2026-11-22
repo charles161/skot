@@ -23,21 +23,18 @@ describe("room-auth (Blocker 1: >=128-bit room IDs & hash-fragment secret)", () 
     expect(a.roomId).not.toBe(a.roomSecret);
   });
 
-  it("encodes room credentials strictly in the URL hash fragment, never query string", () => {
+  it("a share link is the board's path with the secret in the fragment, never in the path or a query", () => {
     const { roomId, roomSecret } = generateRoomCredentials();
-    const url = buildRoomShareUrl(
-      "https://jev.example.com",
-      "/",
-      roomId,
-      roomSecret
-    );
-    const parsedUrl = new URL(url);
+    const url = new URL(buildRoomShareUrl("https://jev.example.com", roomId, roomSecret));
 
-    expect(parsedUrl.search).toBe("");
-    expect(parsedUrl.hash).toBe(formatRoomHash(roomId, roomSecret));
+    expect(url.search).toBe("");
+    expect(url.pathname).toBe(`/b/${roomId}`);
+    expect(url.hash).toBe(`#k=${roomSecret}`);
+  });
 
-    const roundTrip = parseRoomHash(parsedUrl.hash);
-    expect(roundTrip).toEqual({ roomId, roomSecret });
+  it("old #room=…&k=… fragments still parse", () => {
+    const creds = generateRoomCredentials();
+    expect(parseRoomHash(formatRoomHash(creds.roomId, creds.roomSecret))).toEqual(creds);
   });
 
   it("rejects weak 4-char room IDs and missing or short secrets", () => {

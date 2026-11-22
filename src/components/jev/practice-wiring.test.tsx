@@ -56,7 +56,7 @@ describe("practice mode: every AI surface reads the one aiQuiet flag", () => {
   });
 
   it("a restored room in practice shows no predictions on load", () => {
-    expect(between(workspace, "if (initialEls.length > 0) {", "setJoiningSharedRoom(!creds.createdNew)")).toMatch(
+    expect(between(workspace, "if (initialEls.length > 0) {", "setJoiningSharedRoom(creds.joining)")).toMatch(
       /if \(anchor && !restoredPractice\)/
     );
   });

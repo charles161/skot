@@ -2,6 +2,7 @@
 
 import { IconDownload, IconWarning } from "@/brand/icons";
 import { Button } from "@/components/ui/button";
+import { appUrl } from "@/lib/base-path";
 
 export function downloadSavedCopy(raw: string) {
   const url = URL.createObjectURL(new Blob([raw], { type: "application/json" }));
@@ -30,7 +31,7 @@ export function UnreadableBoard({ raw }: { raw: string }) {
             <IconDownload className="h-4 w-4" aria-hidden="true" />
             Download saved copy
           </Button>
-          <Button type="button" variant="outline" onClick={() => window.location.assign(window.location.pathname)}>
+          <Button type="button" variant="outline" onClick={() => window.location.assign(appUrl("/new"))}>
             Start a new board
           </Button>
         </div>

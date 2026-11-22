@@ -6,6 +6,7 @@
 
 Evidence for every check: verify/out/<check>.png and one JSON line in verify/out/results.jsonl.
 """
+import contextlib
 import json
 import os
 import re
@@ -117,13 +118,21 @@ def server(pytestconfig):
         return
     if not os.path.isdir(os.path.join(REPO, ".next")):
         raise pytest.UsageError("no .next build in %s: run `pnpm build` before --launch" % REPO)
+    with launched_app(out, "server.log", {}) as base:
+        yield {"base": base, "launched": True}
+
+
+@contextlib.contextmanager
+def launched_app(out, log_name, extra_env):
+    """A `next start` from this checkout on a free port of 127.0.0.1; stopped by the PID this started."""
     port = _free_port()
     base = "http://127.0.0.1:%d" % port
     # TRUST_PROXY=cloudflare makes the server key its per-IP limits on CF-Connecting-IP, so each check
     # can act as its own visitor (the `page` fixture sets a distinct one) instead of all checks sharing
     # one loopback IP's signaling and rank budgets.
     env = dict(os.environ, NODE_ENV="production", TRUST_PROXY="cloudflare", NEXT_TELEMETRY_DISABLED="1")
-    log = open(os.path.join(out, "server.log"), "w")
+    env.update(extra_env)
+    log = open(os.path.join(out, log_name), "w")
     proc = subprocess.Popen(["pnpm", "exec", "next", "start", "-p", str(port), "-H", "127.0.0.1"], cwd=REPO,
                             env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     try:
@@ -134,10 +143,10 @@ def server(pytestconfig):
             if time.time() > deadline:
                 raise RuntimeError("next start not healthy after 90 s; see %s" % log.name)
             time.sleep(0.5)
-        yield {"base": base, "launched": True}
+        yield base
     finally:
         try:
-            os.killpg(proc.pid, signal.SIGTERM)  # the process group this fixture created, by PID
+            os.killpg(proc.pid, signal.SIGTERM)  # the process group this started, by PID
             proc.wait(timeout=15)
         except (OSError, subprocess.TimeoutExpired):
             os.killpg(proc.pid, signal.SIGKILL)

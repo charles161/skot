@@ -156,13 +156,9 @@ import {
   type PeerQuarantineIncident,
 } from "@/lib/jev/remote-guard";
 import { MAX_BOARD_ELEMENTS, type StoredBoardSnapshot } from "@/lib/jev/sync-validation";
-import { exceedsBoardLimit, readSavedBoard, writeSavedBoard, type SaveOutcome } from "@/lib/jev/saved-board";
-import {
-  formatRoomHash,
-  generateRoomCredentials,
-  parseRoomHash,
-  RoomCredentials,
-} from "@/lib/jev/room-auth";
+import { exceedsBoardLimit, readSavedBoard, type SaveOutcome } from "@/lib/jev/saved-board";
+import { BoardSaver } from "@/lib/jev/board-saver";
+import type { MissingBoardInfo } from "@/lib/jev/boards";
 import { JevP2PCollab } from "@/lib/jev/webrtc-collab";
 import {
   BoardFileMenuItems,
@@ -179,7 +175,9 @@ import { findStarterBoard } from "@/lib/jev/starter-boards";
 import { ForkHud } from "./ForkHud";
 import { ForkPressureStep } from "./ForkPressureStep";
 import { JevCanvas } from "./JevCanvas";
+import { MissingBoard } from "./MissingBoard";
 import { MoreShapesButton } from "./MoreShapesMenu";
+import { BoardsMenuItems, MyBoardsDialog } from "./MyBoards";
 import { NotationMorphBar } from "./NotationMorphBar";
 import { PackChip } from "./PackChip";
 import { PacksPanel } from "./PacksPanel";
@@ -192,6 +190,7 @@ import { ShareP2PDialog } from "./ShareP2PDialog";
 import { ThoughtBar } from "./ThoughtBar";
 import { UnreadableBoard } from "./UnreadableBoard";
 import { usePracticeSession } from "./usePracticeSession";
+import { useBoardPage } from "./use-board-page";
 import { usePacks } from "./use-packs";
 import { useMoves } from "./use-moves";
 import { MoveNoticeToast, MovesMenu } from "./MovesMenu";
@@ -218,24 +217,6 @@ const TOOLS: Array<{
 const PEER_NAMES = ["Maya", "Soren", "Nadia", "Kavi", "Elena", "Theo"];
 /** Starter boards are large; fit them with slim side margins so text stays legible on a laptop. */
 const STARTER_BOARD_FIT_MARGINS = { top: 96, right: 32, bottom: 110, left: 32 };
-
-function getOrCreateRoomCredentials(): RoomCredentials & {
-  createdNew: boolean;
-} {
-  if (typeof window === "undefined") {
-    return { roomId: "", roomSecret: "", createdNew: false };
-  }
-  const parsed = parseRoomHash(window.location.hash);
-  if (parsed) {
-    return { ...parsed, createdNew: false };
-  }
-  const fresh = generateRoomCredentials();
-  const url = new URL(window.location.href);
-  url.searchParams.delete("room");
-  url.hash = formatRoomHash(fresh.roomId, fresh.roomSecret);
-  window.history.replaceState({}, "", url.toString());
-  return { ...fresh, createdNew: true };
-}
 
 interface BroadcastSyncPayload {
   elements: JevElement[];
@@ -368,6 +349,8 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   const [elements, setElements] = useState<JevElement[]>([]);
   const [boardReady, setBoardReady] = useState(false);
   const [unreadableSave, setUnreadableSave] = useState<string | null>(null);
+  const [missingBoard, setMissingBoard] = useState<MissingBoardInfo | null>(null);
+  const [myBoardsOpen, setMyBoardsOpen] = useState(false);
   const [joiningSharedRoom, setJoiningSharedRoom] = useState(false);
   const [historyCounts, setHistoryCounts] = useState({ undo: 0, redo: 0 });
   const historyRef = useRef<BoardHistoryController | null>(null);
@@ -787,16 +770,22 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   const boardNotice = useBoardNotice();
   const showBoardNotice = boardNotice.show;
   const dismissBoardNotice = boardNotice.dismiss;
+  const boardPage = useBoardPage(collabEnabled, boardNotice.show);
   const importPending = useImportFragment(boardNotice.show);
   const boardFile = useBoardFileActions(
     () => ({ elements: elementsRef.current, boardTitle: boardTitleRef.current }),
-    boardNotice.show
+    boardNotice.show,
+    boardPage.leave
   );
 
   // Initialize room, load saved state if present, and start WebRTC P2P session
   useEffect(() => {
     if (importPending) return;
-    const creds = getOrCreateRoomCredentials();
+    const creds = boardPage.open();
+    if (creds.kind === "missing") {
+      const showTimer = window.setTimeout(() => setMissingBoard(creds), 0);
+      return () => window.clearTimeout(showTimer);
+    }
     const rid = creds.roomId;
     const rsecret = creds.roomSecret;
 
@@ -829,8 +818,10 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     let initialTitle = boardTitleRef.current;
     let restored = false;
     let unreadable: string | null = null;
+    let loadedRaw: string | null = null;
     try {
-      const saved = readSavedBoard(window.localStorage.getItem(boardStorageKey(rid)));
+      loadedRaw = window.localStorage.getItem(boardStorageKey(rid));
+      const saved = readSavedBoard(loadedRaw);
       if (saved.kind === "unreadable") unreadable = saved.raw;
       if (saved.kind === "board") {
         const parsed = saved.snapshot;
@@ -875,9 +866,29 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       };
     }
 
-    if (creds.createdNew) {
-      canPersistRef.current = true;
-    }
+    boardPage.attach(
+      new BoardSaver({
+        storage: getBrowserStorage,
+        roomId: rid,
+        roomSecret: rsecret,
+        loadedRaw,
+        now: initNow,
+        canSave: () => canPersistRef.current,
+        read: () => ({
+          elements: elementsRef.current,
+          boardTitle: boardTitleRef.current,
+          titleRev: titleRevRef.current,
+          titleUpdatedBy: titleUpdatedByRef.current || undefined,
+          tombstones: tombstonesRef.current,
+          tombstoneHorizonRev: tombstoneHorizonRevRef.current,
+          tombstoneHorizonAt: tombstoneHorizonAtRef.current,
+          boardEpoch: boardEpochRef.current,
+          boardEpochCreatedAt: boardEpochCreatedAtRef.current,
+          baseTimestamp: baseTimestampRef.current,
+          hasLocalEdits: hasLocalEditsRef.current,
+        }),
+      })
+    );
 
     let restoredPractice: PracticeSession | null = null;
     try {
@@ -904,7 +915,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
           if (anchor && !restoredPractice) subjectOptionsRef.current(anchor.id, initialEls);
         }
       } else {
-        setJoiningSharedRoom(!creds.createdNew);
+        setJoiningSharedRoom(creds.joining);
         setBoardReady(true);
       }
     }, 0);
@@ -1125,38 +1136,17 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       collab.destroy();
       collabRef.current = null;
     };
-  }, [importPending, fitToView, rankWithTypeSafeJev, getHistory, restorePractice, showBoardNotice]);
+  }, [importPending, boardPage, fitToView, rankWithTypeSafeJev, getHistory, restorePractice, showBoardNotice]);
 
   // Persist to localStorage quietly (only once local edits exist or host state was synced/created)
   useEffect(() => {
     if (!roomId || !canPersistRef.current) return;
     const timer = window.setTimeout(() => {
-      let outcome: SaveOutcome = "storage_failed";
-      try {
-        outcome = writeSavedBoard(
-          window.localStorage,
-          boardStorageKey(roomId),
-          JSON.stringify({
-            elements,
-            boardTitle,
-            titleRev: titleRevRef.current,
-            titleUpdatedBy: titleUpdatedByRef.current || undefined,
-            tombstones: tombstonesRef.current,
-            tombstoneHorizonRev: tombstoneHorizonRevRef.current,
-            tombstoneHorizonAt: tombstoneHorizonAtRef.current,
-            boardEpoch: boardEpochRef.current,
-            boardEpochCreatedAt: boardEpochCreatedAtRef.current,
-            baseTimestamp: baseTimestampRef.current,
-            hasLocalEdits: hasLocalEditsRef.current,
-          })
-        );
-      } catch {
-        // reading window.localStorage throws when the browser blocks it
-      }
-      if (outcome !== "saved") showBoardNotice({ tone: "error", text: NOT_SAVED[outcome] });
+      const outcome = boardPage.save();
+      if (outcome !== "saved" && outcome !== "unchanged") showBoardNotice({ tone: "error", text: NOT_SAVED[outcome] });
     }, 350);
     return () => window.clearTimeout(timer);
-  }, [elements, boardTitle, roomId, showBoardNotice]);
+  }, [elements, boardTitle, roomId, boardPage, showBoardNotice]);
 
   // Optional Live Collaborator Demo Peer animation
   useEffect(() => {
@@ -2638,6 +2628,8 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
 
   // Global keyboard shortcuts (Tab + Enter predictions, /, tools, Undo/Redo)
   useEffect(() => {
+    // No board on screen (missing or unreadable): its shortcuts are off, and typing can store nothing.
+    if (missingBoard || unreadableSave !== null) return;
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const inInput =
@@ -2881,6 +2873,8 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
+    missingBoard,
+    unreadableSave,
     typeIntoThoughtBar,
     forkSession,
     applyForkTake,
@@ -3180,6 +3174,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     !forkSession &&
     !aiQuiet;
 
+  if (missingBoard) return <MissingBoard board={missingBoard} />;
   if (unreadableSave !== null) return <UnreadableBoard raw={unreadableSave} />;
 
   return (
@@ -3267,6 +3262,14 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
               <BrandWordmark />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-56 rounded-xl">
+              <BoardsMenuItems
+                onOpen={() => {
+                  boardPage.save();
+                  setMyBoardsOpen(true);
+                }}
+                onLeave={boardPage.leave}
+              />
+              <DropdownMenuSeparator />
               <BoardFileMenuItems actions={boardFile} />
               <RestoreCopyMenuItem
                 getStorage={getBrowserStorage}
@@ -3898,6 +3901,13 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         getStorage={getBrowserStorage}
         roomId={roomId}
         onRestore={restoreCopy}
+      />
+
+      <MyBoardsDialog
+        open={myBoardsOpen}
+        onOpenChange={setMyBoardsOpen}
+        current={{ id: roomId, title: boardTitle, count: elements.length }}
+        onLeave={boardPage.leave}
       />
 
       <PracticePicker

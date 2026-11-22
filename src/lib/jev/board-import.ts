@@ -121,7 +121,7 @@ export function stageImportedBoard(
   const creds = generateRoomCredentials();
   storage.setItem(
     boardStorageKey(creds.roomId),
-    JSON.stringify({ ...portableSnapshot(snapshot), hasLocalEdits: true })
+    JSON.stringify({ ...portableSnapshot(snapshot), hasLocalEdits: true, editedAt: Date.now() })
   );
   return creds;
 }

@@ -13,6 +13,7 @@ import {
   parseBoardFile,
   stageImportedBoard,
 } from "@/lib/jev/board-import";
+import { appUrl } from "@/lib/base-path";
 import { hasSavedCopies, type StorageLike } from "@/lib/jev/recovery-buffer";
 import { formatRoomHash } from "@/lib/jev/room-auth";
 import type { StoredBoardSnapshot } from "@/lib/jev/sync-validation";
@@ -26,15 +27,14 @@ export interface BoardNotice {
   text: string;
 }
 
-function replaceHash(hash: string) {
-  const url = new URL(window.location.href);
-  url.hash = hash;
-  window.history.replaceState({}, "", url.toString());
+/** A link that didn't open gets a blank board: the board edited last would pass for the sender's. */
+function replaceImportAddress(roomHash: string | null) {
+  window.history.replaceState(window.history.state, "", roomHash ? `${window.location.pathname}${roomHash}` : appUrl("/new"));
 }
 
 /**
- * `#import=` in the URL: resolved on first load before the workspace creates its room; an `#import=` link
- * pasted into an open tab only changes the fragment, so it reloads into the same path.
+ * `#import=` in the URL: resolved on first load before the workspace opens a board (use-board-page reloads for
+ * one pasted into an open tab).
  * Returns true while the import is still being decoded.
  */
 export function useImportFragment(onNotice: (notice: BoardNotice) => void): boolean {
@@ -49,7 +49,7 @@ export function useImportFragment(onNotice: (notice: BoardNotice) => void): bool
       .catch(() => null)
       .then((roomHash) => {
         if (cancelled) return;
-        replaceHash(roomHash ?? "");
+        replaceImportAddress(roomHash);
         if (!roomHash) onNotice({ tone: "error", text: OPEN_FAILED_MESSAGE });
         setPendingHash(null);
       });
@@ -58,28 +58,18 @@ export function useImportFragment(onNotice: (notice: BoardNotice) => void): bool
     };
   }, [pendingHash, onNotice]);
 
-  useEffect(() => {
-    const onHashChange = () => {
-      if (hasImportHash(window.location.hash)) window.location.reload();
-    };
-    window.addEventListener("hashchange", onHashChange);
-    return () => window.removeEventListener("hashchange", onHashChange);
-  }, []);
-
   return pendingHash !== null;
 }
 
-function openStagedRoom(snapshot: StoredBoardSnapshot) {
+function stageFileBoard(snapshot: StoredBoardSnapshot): string {
   const creds = stageImportedBoard(snapshot, window.localStorage);
-  const url = new URL(window.location.href);
-  url.hash = formatRoomHash(creds.roomId, creds.roomSecret);
-  window.history.pushState({}, "", url.toString());
-  window.location.reload();
+  return `${appUrl("/")}${formatRoomHash(creds.roomId, creds.roomSecret)}`;
 }
 
 export function useBoardFileActions(
   getSnapshot: () => StoredBoardSnapshot & { boardTitle: string },
-  onNotice: (notice: BoardNotice) => void
+  onNotice: (notice: BoardNotice) => void,
+  leave: (to: () => string) => void
 ) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -93,7 +83,7 @@ export function useBoardFileActions(
       return;
     }
     try {
-      openStagedRoom(snapshot);
+      leave(() => stageFileBoard(snapshot));
     } catch {
       onNotice({ tone: "error", text: OPEN_FAILED_MESSAGE });
     }
@@ -130,7 +120,7 @@ export function useBoardFileActions(
       onNotice({ tone: "error", text: "This board is too big for a link. Use Save board (.json) instead." });
       return;
     }
-    const url = new URL(window.location.href);
+    const url = new URL(appUrl("/"), window.location.origin);
     url.hash = hash;
     try {
       await navigator.clipboard.writeText(url.toString());

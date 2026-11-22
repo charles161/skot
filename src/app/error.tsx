@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { IconPlus, IconReset, IconWarning } from "@/brand/icons";
+import { appUrl } from "@/lib/base-path";
 import { Button } from "@/components/ui/button";
 
 function getErrorDigest(error: unknown): string | null {
@@ -54,7 +55,7 @@ export default function AppError({
   // A new room, never a delete: the saved board may be someone's only copy.
   const handleStartNewBoard = () => {
     setResetNotice("Your saved board is untouched. Opening a new one. Press Back to return to it.");
-    window.setTimeout(() => window.location.assign(window.location.pathname), 150);
+    window.setTimeout(() => window.location.assign(appUrl("/new")), 150);
   };
 
   return (

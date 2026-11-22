@@ -1,8 +1,10 @@
 /**
  * Cryptographic room credentials & URL hash-fragment helpers.
- * Keeps per-room secrets strictly in the URL fragment (`#room=...&k=...`)
- * so they are never transmitted in HTTP Referer headers or server access logs.
+ * The secret is kept in the browser, or in the URL fragment of a self-hosted share link (`/b/<id>#k=...`) and of
+ * links made before /b/ (`#room=...&k=...`), so it never reaches HTTP Referer headers or server access logs.
  */
+
+import { appUrl } from "@/lib/base-path";
 
 // 128+ bits encoded as base64url is at least 22 characters.
 export const ROOM_ID_PATTERN = /^[A-Za-z0-9_-]{22,64}$/;
@@ -66,11 +68,10 @@ export function parseRoomHash(hash: string): RoomCredentials | null {
   return { roomId, roomSecret };
 }
 
-export function buildRoomShareUrl(
-  origin: string,
-  pathname: string,
-  roomId: string,
-  roomSecret: string
-): string {
-  return `${origin}${pathname}${formatRoomHash(roomId, roomSecret)}`;
+export function boardPath(roomId: string): string {
+  return appUrl(`/b/${encodeURIComponent(roomId)}`);
+}
+
+export function buildRoomShareUrl(origin: string, roomId: string, roomSecret: string): string {
+  return `${origin}${boardPath(roomId)}#k=${encodeURIComponent(roomSecret)}`;
 }

@@ -179,9 +179,12 @@ describe("every path goes through the guards", () => {
       expect(text, `${path}: start a new room instead; a saved board may be someone's only copy`).not.toMatch(/\.removeItem\(/);
     }
   });
-  it("the workspace loads with readSavedBoard and saves with writeSavedBoard only", () => {
+  it("the workspace loads with readSavedBoard and saves through BoardSaver's writeSavedBoard only", () => {
     expect(workspace).toMatch(/readSavedBoard\(/);
-    expect(workspace).toMatch(/writeSavedBoard\(/);
+    expect(workspace).toMatch(/new BoardSaver\(/);
+    const saver = source.find((f) => f.path === "lib/jev/board-saver.ts")!.text;
+    expect(saver).toMatch(/writeSavedBoard\(/);
+    expect(saver, "save with writeSavedBoard(): setItem can overwrite the only copy").not.toMatch(/\.setItem\(/);
     expect(workspace, "save with writeSavedBoard(): setItem can overwrite the only copy").not.toMatch(/localStorage\.setItem\(/);
     expect(workspace, "load with readSavedBoard(): the strict parser is for untrusted input").not.toMatch(/parseStoredBoardSnapshot\(/);
   });

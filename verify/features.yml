@@ -540,6 +540,71 @@ features:
     sources:
       - src/lib/jev/recovery-buffer.ts
 
+  - id: board-link
+    title: "Clean board link: /b/<id> with no query or hash, the secret kept in the browser, the same link preview
+      and CSP nonce as /, and plain / opens the board edited last"
+    check: board-link
+    sources:
+      - src/app/b/[id]/page.tsx
+      - src/app/new/page.tsx
+      - src/components/jev/use-board-page.ts
+
+  - id: board-migration
+    title: "Boards saved by the build before /b/ (real storage from e7fe246): every old link opens the same room with
+      the same elements and saved copies, every board is listed, and opening them changes none of their storage"
+    check: board-migration
+    sources:
+      - src/lib/jev/boards.ts
+      - src/components/jev/use-board-page.ts
+
+  - id: board-switch
+    title: "Back and forward move between boards and save the one left, even mid-debounce, mid-label, through an old
+      link in the same tab or from the back/forward cache"
+    check: board-switch
+    sources:
+      - src/lib/jev/board-saver.ts
+      - src/components/jev/use-board-page.ts
+
+  - id: my-boards
+    title: "Board menu > My boards lists every board here with title, last edit and element count, newest first;
+      opens one by click or keyboard, fits 390px; New board makes another"
+    check: my-boards
+    sources:
+      - src/components/jev/MyBoards.tsx
+
+  - id: board-two-tabs
+    title: "Two tabs on two boards never write into each other; two tabs on one board converge"
+    check: board-two-tabs
+    sources:
+      - src/lib/jev/board-saver.ts
+
+  - id: board-unknown
+    title: "A link to a board this browser doesn't have says boards are saved in the browser they were made in,
+      offers New board, and creates no storage"
+    check: board-unknown
+    sources:
+      - src/components/jev/MissingBoard.tsx
+
+  - id: board-storage-full
+    title: "Full storage: no board is evicted, and a board that can't be saved is not left"
+    check: board-storage-full
+    sources:
+      - src/lib/jev/board-saver.ts
+
+  - id: board-analytics
+    title: "Analytics and Speed Insights report /b/[id], never a board id"
+    check: board-analytics
+    sources:
+      - src/lib/analytics-privacy.ts
+      - src/app/vercel-analytics-client.tsx
+
+  - id: board-self-host
+    title: "Self-hosted collab: the share link is /b/<id>#k=<secret>, old share links still join, no key no join"
+    check: board-self-host
+    sources:
+      - src/components/jev/ShareP2PDialog.tsx
+      - src/lib/jev/room-auth.ts
+
 internal:
   - path: src/app/api/health/route.ts
     reason: Ops health probe; the gate uses it to wait for `next start`, nobody sees it.

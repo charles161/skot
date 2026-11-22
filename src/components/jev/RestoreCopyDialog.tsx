@@ -15,11 +15,11 @@ interface RestoreCopyDialogProps {
   onRestore: (snapshot: StoredBoardSnapshot) => void;
 }
 
-const ROW =
+export const ROW =
   "flex min-h-[48px] w-full items-center justify-between gap-3 rounded-xl border border-border bg-card/70 px-3 py-2 text-left transition-colors hover:border-[#D94E28]/50 hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
-const BADGE = "rounded-md border px-1.5 py-0.5 text-[10px] font-semibold";
+export const BADGE = "rounded-md border px-1.5 py-0.5 text-[10px] font-semibold";
 
-function savedTime(at: number): string {
+export function savedTime(at: number): string {
   const date = new Date(at);
   const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   if (date.toDateString() === new Date().toDateString()) return `Today, ${time}`;

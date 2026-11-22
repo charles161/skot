@@ -93,7 +93,7 @@ def test_first_load(page, skot, evidence):
     evidence.note(url=page.url, html_dark=" dark" in " " + html_class, body_background=bg,
                   canvas=page.locator("[role=application] svg").count())
     assert page.locator("[role=application] svg").count() == 1, "the canvas did not render"
-    assert "#room=" in page.url, "no room was created in the URL fragment"
+    assert skot.room_id(), "no board was created at /b/<id>"
     assert "dark" in html_class.split(), "html is not dark by default (class=%r)" % html_class
     assert max(rgb) < 80, "body background %s is not a dark color" % bg
     assert toggle.count() == 1, "theme toggle should offer the light theme, meaning dark is active"
@@ -886,7 +886,7 @@ def assert_subflow_sequence(page, skot, evidence, base_url):
     with open(URL_SHORTENER_HLD, encoding="utf-8") as f:
         board = json.load(f)
     page.goto(base_url + "/" + import_link(board), wait_until="load")
-    page.wait_for_function("() => /#room=/.test(location.hash)", timeout=30000)
+    page.wait_for_function("() => /\\/b\\//.test(location.pathname)", timeout=30000)
     before = skot.wait_state(lambda els: len(els) == len(board), what="the URL-shortener HLD")
     skot.settle(600)
     label_of = {e["id"]: e.get("label") for e in before}
@@ -1705,7 +1705,7 @@ def test_no_emoji_icons(page, skot, evidence, server):
 # ------------------------------------------------------------------ board import / files
 
 IMPORT_FIXTURE = os.path.join(REPO, "src", "lib", "jev", "__fixtures__", "import-link.json")
-ROOM_HASH = re.compile(r"#room=[A-Za-z0-9_-]{22,}&k=[A-Za-z0-9_-]{22,}$")
+BOARD_URL = re.compile(r"/b/[A-Za-z0-9_-]{22,}(#k=[A-Za-z0-9_-]{22,})?$")  # the key only where collab is on
 
 
 @check("board-import")
@@ -1716,9 +1716,9 @@ def test_board_import(page, skot, new_page, evidence, base_url, tmp_path):
 
     # 1. An #import= link (encoded by skot-bot's Python encoder) opens as a fresh room with those elements.
     page.goto(base_url + "/" + fixture["pythonHash"], wait_until="load")
-    page.wait_for_function("() => /#room=/.test(location.hash)", timeout=30000)
+    page.wait_for_function("() => /\\/b\\//.test(location.pathname)", timeout=30000)
     got = skot.wait_state(lambda els: len(els) == len(want), what="the imported board")
-    assert ROOM_HASH.search(page.url) and "import=" not in page.url, "URL after import: %s" % page.url
+    assert BOARD_URL.search(page.url) and "import=" not in page.url, "URL after import: %s" % page.url
     assert [(e["id"], e["label"]) for e in got] == want
     canvas_text = page.locator("[role=application] svg").text_content()
     assert all(label in canvas_text for _, label in want), "imported labels not drawn on the canvas"
@@ -1739,7 +1739,7 @@ def test_board_import(page, skot, new_page, evidence, base_url, tmp_path):
         page.get_by_role("menuitem", name="Open board (.json)").click()
     with page.expect_navigation(wait_until="load"):
         fc.value.set_files(saved_path)
-    page.wait_for_function("() => /#room=/.test(location.hash)", timeout=30000)
+    page.wait_for_function("() => /\\/b\\//.test(location.pathname)", timeout=30000)
     reopened = skot.wait_state(lambda els: len(els) == len(want), what="the opened board")
     assert page.url != first_room, "Open board did not start a new room"
     assert reopened == fixture["snapshot"]["elements"]
@@ -1751,7 +1751,7 @@ def test_board_import(page, skot, new_page, evidence, base_url, tmp_path):
     bad.goto(base_url + "/" + fixture["pythonHash"][:60], wait_until="load")
     notice = bad.locator("[data-testid=board-notice]")
     notice.wait_for(state="visible", timeout=15000)
-    bad.wait_for_function("() => /#room=/.test(location.hash)", timeout=30000)
+    bad.wait_for_function("() => /\\/b\\//.test(location.pathname)", timeout=30000)
     bad_skot = type(skot)(bad, base_url)
     bad_skot.settle(800)
     assert "Could not open that board" in notice.inner_text()
@@ -1827,6 +1827,6 @@ def test_two_person_sync(page, skot, new_page, evidence, base_url):
     skot.add("box", "Live Edit", (o[0] + 400, o[1]))
     guest.wait_for_function(has, arg="Live Edit", timeout=20000)
     peers = page.get_by_role("banner").locator("button", has_text="P2P").inner_text()
-    evidence.note(room=page.url.split("&")[0], host_peers_label=peers)
+    evidence.note(room=page.url.split("#")[0], host_peers_label=peers)
     assert "2" in peers, "the share button should count two peers, says %r" % peers
     assert_no_console_errors(evidence)

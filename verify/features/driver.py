@@ -7,8 +7,11 @@ socket daemon: the feature suite owns one Playwright page per check. Page evalua
 (the board the app persists in localStorage, the canvas transform); every change goes through the UI.
 """
 import json
+import re
 import time
+import urllib.parse
 
+BOARD_PATH = re.compile(r"/b/([^/?#]+)/?$")
 VIEWPORT = {"width": 1600, "height": 1000}
 SAFE = {"left": 70, "top": 120, "right": 1530, "bottom": 600}
 
@@ -59,7 +62,8 @@ class Driver:
     # ---------------- reading state
 
     def room_id(self):
-        return self.page.evaluate("() => new URLSearchParams(location.hash.slice(1)).get('room')")
+        found = BOARD_PATH.search(urllib.parse.urlsplit(self.page.url).path)
+        return urllib.parse.unquote(found.group(1)) if found else None
 
     def snapshot(self):
         rid = self.room_id()
@@ -124,10 +128,14 @@ class Driver:
 
     # ---------------- user-like primitives
 
+    def wait_board(self, timeout=30000):
+        """The board in the address bar is the one on screen."""
+        self.page.wait_for_selector("[role=application] svg", timeout=timeout)
+        self.page.wait_for_function("() => /\\/b\\/[^/]+$/.test(location.pathname)", timeout=timeout)
+
     def new_board(self, starter=None):
-        self.page.goto(self.base + "/", wait_until="load", timeout=60000)
-        self.page.wait_for_selector("[role=application] svg", timeout=30000)
-        self.page.wait_for_function("() => location.hash.includes('room=')", timeout=30000)
+        self.page.goto(self.base + "/new", wait_until="load", timeout=60000)
+        self.wait_board()
         self.page.wait_for_timeout(500)
         if starter:
             self.open_examples()

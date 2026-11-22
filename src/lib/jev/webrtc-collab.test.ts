@@ -1761,7 +1761,6 @@ describe("Blockers 3, 4 & 5 (client): JevP2PCollab handshake, roster, ICE buffer
     // Share URL NEVER contains creatorToken
     const shareUrl = buildRoomShareUrl(
       "https://jev.example.com",
-      "/",
       VALID_ROOM,
       VALID_SECRET
     );

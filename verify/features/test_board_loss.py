@@ -145,7 +145,8 @@ def test_board_stuck_recovers(page, skot, evidence):
         assert f.read() == broken, "the download is not the saved copy"
     panel.get_by_role("button", name="Start a new board").click()
     page.wait_for_selector("[role=application] svg", timeout=30000)
-    page.wait_for_function("() => location.hash.includes('room=')")
+    page.wait_for_function("k => !location.pathname.endsWith(k) && /\\/b\\//.test(location.pathname)",
+                           arg=key[len("jev_board_"):])
     assert "jev_board_" + skot.room_id() != key, "the new board reused the stuck board's room"
     type_node(skot, "fresh")
     assert page.evaluate("k => localStorage.getItem(k)", key) == broken, "starting fresh deleted the saved copy"

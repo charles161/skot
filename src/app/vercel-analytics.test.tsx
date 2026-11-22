@@ -3,7 +3,7 @@ import path from "node:path";
 import { inject } from "@vercel/analytics";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildCspHeader } from "@/proxy";
-import { dropUrlFragment } from "@/lib/analytics-privacy";
+import { scrubAnalyticsUrl } from "@/lib/analytics-privacy";
 import { VercelAnalytics, isVercelDeployment } from "./vercel-analytics";
 import { SkotAnalytics } from "./vercel-analytics-client";
 
@@ -15,23 +15,30 @@ describe("Vercel Web Analytics only loads on a Vercel deployment", () => {
     expect(VercelAnalytics({ env: {} })).toBeNull();
   });
 
-  it("renders the analytics client (wrapping @vercel/analytics/next) when VERCEL=1", () => {
+  it("renders the analytics client (wrapping @vercel/analytics/react) when VERCEL=1", () => {
     expect(isVercelDeployment({ VERCEL: "1" })).toBe(true);
     const element = VercelAnalytics({ env: { VERCEL: "1" } });
     expect(element?.type).toBe(SkotAnalytics);
   });
 
-  it("never sends the URL fragment: it carries the room id and E2E key (#room=…&k=…)", () => {
+  it("never sends the query or fragment: they can carry the room id and E2E key (#room=…&k=…)", () => {
     const view = { type: "pageview" as const, url: "https://skot.app/?x=1#room=abc&k=SECRETKEY" };
-    expect(dropUrlFragment(view)).toEqual({ type: "pageview", url: "https://skot.app/?x=1" });
-    expect(dropUrlFragment({ type: "event", url: "https://skot.app/#k=SECRET" })?.url).toBe("https://skot.app/");
-    expect(dropUrlFragment({ type: "pageview", url: "https://skot.app/board" })?.url).toBe("https://skot.app/board");
+    expect(scrubAnalyticsUrl(view)).toEqual({ type: "pageview", url: "https://skot.app/" });
+    expect(scrubAnalyticsUrl({ type: "event", url: "https://skot.app/#k=SECRET" })?.url).toBe("https://skot.app/");
+    expect(scrubAnalyticsUrl({ type: "pageview", url: "https://skot.app/board" })?.url).toBe("https://skot.app/board");
   });
 
-  it("wires dropUrlFragment as beforeSend on <Analytics />", () => {
+  it("wires scrubAnalyticsUrl as beforeSend on <Analytics />", () => {
     const client = readFileSync(path.join(__dirname, "vercel-analytics-client.tsx"), "utf8");
     expect(client.startsWith('"use client";')).toBe(true);
-    expect(client).toMatch(/<Analytics beforeSend=\{dropUrlFragment\} \/>/);
+    expect(client).toMatch(/<Analytics \{\.\.\.VERCEL_NEXT\} route=\{route\} path=\{route\} beforeSend=\{scrubAnalyticsUrl\} \/>/);
+  });
+
+  it("keeps what the /next wrapper passed: the framework and Vercel's per-deploy endpoints", () => {
+    const client = readFileSync(path.join(__dirname, "vercel-analytics-client.tsx"), "utf8");
+    expect(client).toMatch(/framework: "next"/);
+    expect(client).toMatch(/configString: process\.env\.NEXT_PUBLIC_VERCEL_OBSERVABILITY_CLIENT_CONFIG/);
+    expect(client).toMatch(/basePath: process\.env\.NEXT_PUBLIC_VERCEL_OBSERVABILITY_BASEPATH/);
   });
 
   it("is rendered once from the root layout", () => {
@@ -153,15 +160,15 @@ describe("the CSP lets Vercel Web Analytics load and report, and nothing else ch
 describe("Vercel Speed Insights (Charles, 21 Nov 2026)", () => {
   it("renders <SpeedInsights /> with the same fragment scrubbing, next to <Analytics />", () => {
     const client = readFileSync(path.join(__dirname, "vercel-analytics-client.tsx"), "utf8");
-    expect(client).toMatch(/import \{ SpeedInsights \} from "@vercel\/speed-insights\/next";/);
-    expect(client).toMatch(/<SpeedInsights beforeSend=\{dropUrlFragment\} \/>/);
+    expect(client).toMatch(/import \{ SpeedInsights \} from "@vercel\/speed-insights\/react";/);
+    expect(client).toMatch(/<SpeedInsights \{\.\.\.VERCEL_NEXT\} route=\{route\} beforeSend=\{scrubAnalyticsUrl\} \/>/);
   });
 });
 
 describe("Speed Insights vitals never carry the fragment", () => {
   it("scrubs a vital event's url", () => {
     const vital = { type: "vital" as const, url: "https://skot.app/#room=a&k=SECRET", route: "/" };
-    expect(dropUrlFragment(vital)).toEqual({ type: "vital", url: "https://skot.app/", route: "/" });
+    expect(scrubAnalyticsUrl(vital)).toEqual({ type: "vital", url: "https://skot.app/", route: "/" });
   });
 });
 
@@ -169,7 +176,7 @@ describe("a shared #import= board never reaches Analytics or Speed Insights", ()
   it("scrubs the whole board payload from pageviews, events and vitals", () => {
     const url = "https://skot.lightslips.ai/#import=H4sIAAAAAAAAA6tWSs3LTEksyczPU7KqVsrJT0wpVrKKjq0FAMPGPu8XAAAA";
     for (const type of ["pageview", "event", "vital"] as const) {
-      expect(dropUrlFragment({ type, url }).url).toBe("https://skot.lightslips.ai/");
+      expect(scrubAnalyticsUrl({ type, url }).url).toBe("https://skot.lightslips.ai/");
     }
   });
 });
