@@ -1,0 +1,352 @@
+{
+ "source": "prod skot.lightslips.ai, anthropic/claude-haiku-5.5, 22 Nov 2026: board Shopper, Edge gateway, API service, Orders DB, Payment provider, Email worker; selected API service + Orders DB; target '< $500/month'",
+ "constraint": {
+  "pressure": "cost",
+  "target": {
+   "metric": "budget",
+   "comparator": "<=",
+   "value": 500,
+   "unit": "USD/mo",
+   "text": "$500/mo"
+  },
+  "text": "< $500/month"
+ },
+ "takes": [
+  {
+   "archetype": "serverless_batch",
+   "title": "Serverless API with batched DB writes",
+   "rationale": "Scale-to-zero compute and batching order writes cut the always-on cost of the API and database tier.",
+   "tradeoffTag": "cheaper, cold-start latency",
+   "graph": {
+    "notation": "architecture",
+    "summary": "Serverless API feeding a batched DB writer",
+    "nodes": [
+     {
+      "id": "sl_shopper",
+      "label": "Shopper",
+      "kind": "actor",
+      "tone": "terracotta"
+     },
+     {
+      "id": "sl_gateway",
+      "label": "Edge gateway",
+      "kind": "lb",
+      "tone": "cobalt"
+     },
+     {
+      "id": "sl_api",
+      "label": "API functions",
+      "sublabel": "scale to zero",
+      "kind": "node",
+      "tone": "cobalt"
+     },
+     {
+      "id": "sl_queue",
+      "label": "Write batcher",
+      "kind": "queue",
+      "tone": "ochre"
+     },
+     {
+      "id": "sl_db",
+      "label": "Orders DB",
+      "kind": "database",
+      "tone": "teal"
+     },
+     {
+      "id": "sl_email",
+      "label": "Email worker",
+      "kind": "node",
+      "tone": "cobalt"
+     },
+     {
+      "id": "sl_pay",
+      "label": "Payment provider",
+      "kind": "external",
+      "tone": "slate"
+     }
+    ],
+    "edges": [
+     {
+      "from": "sl_shopper",
+      "to": "sl_gateway"
+     },
+     {
+      "from": "sl_gateway",
+      "to": "sl_api"
+     },
+     {
+      "from": "sl_api",
+      "to": "sl_queue"
+     },
+     {
+      "from": "sl_queue",
+      "to": "sl_db",
+      "label": "batched"
+     },
+     {
+      "from": "sl_api",
+      "to": "sl_pay"
+     },
+     {
+      "from": "sl_api",
+      "to": "sl_email",
+      "dashed": true
+     }
+    ]
+   },
+   "tradeoffs": {
+    "pressure": "cost",
+    "buys": "Monthly compute drops to a usage-based bill; idle cost near $0 and peak handled by autoscaling (typical: $80-250/mo at low-to-mid traffic vs $300-600 for always-on VMs).",
+    "costs": [
+     {
+      "axis": "latency",
+      "text": "Cold starts add 200-800 ms on first request",
+      "severity": 2
+     },
+     {
+      "axis": "money",
+      "text": "Per-request pricing spikes under sustained high traffic",
+      "severity": 2
+     },
+     {
+      "axis": "consistency",
+      "text": "Batched writes delay order visibility briefly",
+      "severity": 2
+     },
+     {
+      "axis": "complexity",
+      "text": "Function packaging and batch logic to maintain",
+      "severity": 2
+     },
+     {
+      "axis": "ops",
+      "text": "Vendor-specific limits and debugging tooling",
+      "severity": 2
+     }
+    ],
+    "failureMode": "A burst of traffic exhausts concurrency limits and throttles checkout requests."
+   }
+  },
+  {
+   "archetype": "autoscale",
+   "title": "Right-sized autoscaling VMs",
+   "rationale": "Scaling a small instance pool to demand and using a smaller managed database tier keeps spend under budget without changing the code path.",
+   "tradeoffTag": "simple, scale lag",
+   "graph": {
+    "notation": "architecture",
+    "summary": "Load-balanced autoscaling API pool with managed DB",
+    "nodes": [
+     {
+      "id": "as_shopper",
+      "label": "Shopper",
+      "kind": "actor",
+      "tone": "terracotta"
+     },
+     {
+      "id": "as_lb",
+      "label": "Edge gateway",
+      "kind": "lb",
+      "tone": "cobalt"
+     },
+     {
+      "id": "as_pool",
+      "label": "API pool",
+      "sublabel": "autoscaled 2-6",
+      "kind": "node",
+      "tone": "cobalt"
+     },
+     {
+      "id": "as_db",
+      "label": "Orders DB",
+      "sublabel": "small managed tier",
+      "kind": "database",
+      "tone": "teal"
+     },
+     {
+      "id": "as_email",
+      "label": "Email worker",
+      "kind": "node",
+      "tone": "cobalt"
+     },
+     {
+      "id": "as_pay",
+      "label": "Payment provider",
+      "kind": "external",
+      "tone": "slate"
+     }
+    ],
+    "edges": [
+     {
+      "from": "as_shopper",
+      "to": "as_lb"
+     },
+     {
+      "from": "as_lb",
+      "to": "as_pool"
+     },
+     {
+      "from": "as_pool",
+      "to": "as_db"
+     },
+     {
+      "from": "as_pool",
+      "to": "as_pay"
+     },
+     {
+      "from": "as_pool",
+      "to": "as_email",
+      "dashed": true
+     }
+    ]
+   },
+   "tradeoffs": {
+    "pressure": "cost",
+    "buys": "Pay only for active instances with a small floor; typical total of $250-420/mo versus over-provisioned fixed fleets (typical).",
+    "costs": [
+     {
+      "axis": "latency",
+      "text": "Scale-out lag causes brief p99 spikes",
+      "severity": 2
+     },
+     {
+      "axis": "money",
+      "text": "Minimum instance floor still incurs base cost",
+      "severity": 1
+     },
+     {
+      "axis": "consistency",
+      "text": "No change to write consistency model",
+      "severity": 1
+     },
+     {
+      "axis": "complexity",
+      "text": "Scaling policies and health checks to tune",
+      "severity": 1
+     },
+     {
+      "axis": "ops",
+      "text": "Still patching OS and runtime on each instance",
+      "severity": 2
+     }
+    ],
+    "failureMode": "Sudden spikes outpace scale-out and queue checkout requests until new instances are healthy."
+   }
+  },
+  {
+   "archetype": "queue_buffering",
+   "title": "Queue-buffered email and payments",
+   "rationale": "Moving the email worker and payment callbacks behind a cheap managed queue lets smaller workers run at lower cost during peaks.",
+   "tradeoffTag": "cheap workers, async delay",
+   "graph": {
+    "notation": "architecture",
+    "summary": "API publishing to a queue consumed by small workers",
+    "nodes": [
+     {
+      "id": "qb_shopper",
+      "label": "Shopper",
+      "kind": "actor",
+      "tone": "terracotta"
+     },
+     {
+      "id": "qb_gateway",
+      "label": "Edge gateway",
+      "kind": "lb",
+      "tone": "cobalt"
+     },
+     {
+      "id": "qb_api",
+      "label": "API service",
+      "kind": "node",
+      "tone": "cobalt"
+     },
+     {
+      "id": "qb_db",
+      "label": "Orders DB",
+      "kind": "database",
+      "tone": "teal"
+     },
+     {
+      "id": "qb_queue",
+      "label": "Event queue",
+      "kind": "queue",
+      "tone": "ochre"
+     },
+     {
+      "id": "qb_email",
+      "label": "Email worker",
+      "sublabel": "small instance",
+      "kind": "node",
+      "tone": "cobalt"
+     },
+     {
+      "id": "qb_pay",
+      "label": "Payment provider",
+      "kind": "external",
+      "tone": "slate"
+     }
+    ],
+    "edges": [
+     {
+      "from": "qb_shopper",
+      "to": "qb_gateway"
+     },
+     {
+      "from": "qb_gateway",
+      "to": "qb_api"
+     },
+     {
+      "from": "qb_api",
+      "to": "qb_db"
+     },
+     {
+      "from": "qb_api",
+      "to": "qb_queue"
+     },
+     {
+      "from": "qb_queue",
+      "to": "qb_email",
+      "label": "consume"
+     },
+     {
+      "from": "qb_queue",
+      "to": "qb_pay",
+      "label": "consume",
+      "dashed": true
+     }
+    ]
+   },
+   "tradeoffs": {
+    "pressure": "cost",
+    "buys": "Workers run on small instances sized to average load instead of peak; typical saving of 30-50% on the async tier (typical).",
+    "costs": [
+     {
+      "axis": "latency",
+      "text": "Confirmation emails arrive seconds later",
+      "severity": 1
+     },
+     {
+      "axis": "money",
+      "text": "Managed queue adds a small per-message fee",
+      "severity": 1
+     },
+     {
+      "axis": "consistency",
+      "text": "Payment status may lag until callback processed",
+      "severity": 2
+     },
+     {
+      "axis": "complexity",
+      "text": "Retry, dedupe, and dead-letter handling needed",
+      "severity": 2
+     },
+     {
+      "axis": "ops",
+      "text": "Queue monitoring and alerting to maintain",
+      "severity": 1
+     }
+    ],
+    "failureMode": "Queue backlog grows during a provider outage and delays order confirmations for hours."
+   }
+  }
+ ]
+}

@@ -115,6 +115,13 @@ features:
       - src/components/jev/JevWorkspace.tsx
       - src/components/jev/PredictionHud.tsx
 
+  - id: fork-rename-keeps-arrows
+    title: "8A: when a Fork take brings the selected node back under a new name (API service as API functions), the
+      arrows it had to the rest of the board sit on that node, and none move to another node"
+    check: fork-rename-keeps-arrows
+    sources:
+      - src/lib/jev/fork-engine.ts
+
   - id: call-budget
     title: "Drawing does not drain the AI budget: nothing is asked while a shape, label or arrow is in progress; a
       settled add, arrow, click or drag costs one call; a 6-node, 5-arrow board drawn quickly costs at most 3, and

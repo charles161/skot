@@ -27,7 +27,7 @@ import {
   type ForkConstraint,
   type ForkTradeoffs,
 } from "./fork-constraint";
-import { findBoardCounterpart, norm, sameThing } from "./component-catalog";
+import { findBoardCounterpart, norm, sameThing, words } from "./component-catalog";
 import { isContainerKind } from "./notation-kinds";
 import { resolveNonOverlappingTopLeft } from "./placement-engine";
 import type { ColorTone, JevElement } from "./types";
@@ -983,6 +983,50 @@ interface ReusePlan {
   standIns: Map<string, string>;
 }
 
+/**
+ * A selected shape the take kept under a new name ("API service" -> "API functions") matches no take node by
+ * name. Its stand-in is then the new node that took its place in the graph: the one the take wires to the same
+ * neighbours, in the same direction, as the shape was wired on the board. Without it the shape's arrows to the
+ * rest of the board would be handed to whichever new node happens to sit leftmost or rightmost.
+ */
+function adoptRenamed(
+  graph: SemanticGraph,
+  subgraph: SelectedSubgraph,
+  standIns: Map<string, string>,
+  boardFor: Map<string, string>,
+  drawn: SemanticNode[]
+): void {
+  const boardArrows = [...subgraph.incomingExternal, ...subgraph.outgoingExternal, ...subgraph.internalArrows];
+  for (const shape of subgraph.selectedShapes) {
+    if (standIns.has(shape.id)) continue;
+    // Which board node a take node is: an outside node it reuses, or the selected shape it stands in for.
+    const boardIdOf = new Map(boardFor);
+    for (const [selId, semId] of standIns) boardIdOf.set(semId, selId);
+    const taken = new Set(standIns.values());
+    const score = (n: SemanticNode): number => {
+      let shared = 0;
+      for (const a of boardArrows) {
+        const out = a.fromId === shape.id;
+        if (!out && a.toId !== shape.id) continue;
+        const neighbour = out ? a.toId : a.fromId;
+        if (graph.edges.some((e) => (out ? e.from === n.id && boardIdOf.get(e.to) === neighbour : e.to === n.id && boardIdOf.get(e.from) === neighbour))) {
+          shared += 1;
+        }
+      }
+      if (shared === 0) return 0;
+      const sharedWords = words(n.label).filter((w) => words(shape.label).includes(w)).length;
+      return shared + (n.kind === shape.kind ? 0.5 : 0) + Math.min(sharedWords, 1) * 0.25;
+    };
+    let best: { node: SemanticNode; score: number } | null = null;
+    for (const n of drawn) {
+      if (taken.has(n.id)) continue;
+      const sc = score(n);
+      if (sc > 0 && (!best || sc > best.score)) best = { node: n, score: sc };
+    }
+    if (best) standIns.set(shape.id, best.node.id);
+  }
+}
+
 function planReuse(graph: SemanticGraph, subgraph: SelectedSubgraph, groupsAsZones: boolean): ReusePlan {
   const kept = subgraph.surroundings.filter((e) => isShapeElement(e) && !isContainerKind(e.kind));
   const wiredToSelection = new Set(
@@ -1025,6 +1069,7 @@ function planReuse(graph: SemanticGraph, subgraph: SelectedSubgraph, groupsAsZon
     if (onBoard) boardFor.set(n.id, onBoard.id);
     else drawn.push(n);
   }
+  adoptRenamed(graph, subgraph, standIns, boardFor, drawn);
 
   const boardLabel = new Map<string, string>();
   for (const n of graph.nodes) {
@@ -1338,13 +1383,18 @@ export function materializeForkTake(
     into.push(arrow);
   };
 
+  // An arrow of a selected shape the take dropped goes to the take's entry or exit, so its outside node is not
+  // left alone. When the take wires that outside node itself, the take has said who talks to it: nothing is added.
+  const wiredByTake = new Set(plan.boardEdges.flatMap((b) => [b.fromBoard ? b.from : "", b.toBoard ? b.to : ""]));
   const rewiredArrows: JevElement[] = [];
   for (const inc of subgraph.incomingExternal) {
-    const toId = standInEl.get(inc.toId ?? "") ?? entryElementId;
+    const standIn = standInEl.get(inc.toId ?? "");
+    const toId = standIn ?? (wiredByTake.has(inc.fromId ?? "") ? "" : entryElementId);
     if (inc.fromId && toId) link(forkArrow(inc, inc.fromId, toId, now), rewiredArrows);
   }
   for (const out of subgraph.outgoingExternal) {
-    const fromId = standInEl.get(out.fromId ?? "") ?? exitElementId;
+    const standIn = standInEl.get(out.fromId ?? "");
+    const fromId = standIn ?? (wiredByTake.has(out.toId ?? "") ? "" : exitElementId);
     if (out.toId && fromId) link(forkArrow(out, fromId, out.toId, now), rewiredArrows);
   }
 
