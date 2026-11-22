@@ -477,7 +477,7 @@ function utf8ByteLength(value: string): number {
 /**
  * Strips any prototype-polluting own keys safely from parsed JSON objects before Zod validation.
  */
-function hasForbiddenOwnKeys(obj: unknown, depth = 0): boolean {
+export function hasForbiddenOwnKeys(obj: unknown, depth = 0): boolean {
   if (depth > 14 || !obj || typeof obj !== "object") return false;
   if (Array.isArray(obj)) {
     return obj.some((item) => hasForbiddenOwnKeys(item, depth + 1));

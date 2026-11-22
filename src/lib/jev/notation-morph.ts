@@ -2091,7 +2091,7 @@ function keepBoundaryArrow(
  * on the anchor element. Arrows crossing the selection boundary stay on their own shapes.
  */
 /** Cuts a spec to what storage accepts (morphSemanticSpecSyncSchema): a board that saves must load back. */
-function clampSpecForStorage(spec: MorphSemanticSpec): MorphSemanticSpec {
+export function clampSpecForStorage(spec: MorphSemanticSpec): MorphSemanticSpec {
   const cut = (text: string, max: number) => text.slice(0, max);
   const maybe = (text: string | undefined, max: number) => text?.slice(0, max);
   return {

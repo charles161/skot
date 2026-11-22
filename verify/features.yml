@@ -436,6 +436,26 @@ features:
       - src/app/api/signal/route.ts
       - src/app/api/ice-config/route.ts
 
+  - id: board-full-reload
+    title: "A full board refuses the 501st element, duplicate included, and survives a reload and the edit after it"
+    check: board-full-reload
+    sources:
+      - src/components/jev/JevWorkspace.tsx
+      - src/lib/jev/saved-board.ts
+
+  - id: board-morph-reload
+    title: "A board with long labels put through Morph survives a reload and the edit after it"
+    check: board-morph-reload
+    sources:
+      - src/lib/jev/notation-morph.ts
+
+  - id: board-stuck-recovers
+    title: "Boards already saved over the limits load back; an unreadable one is kept untouched and can be downloaded"
+    check: board-stuck-recovers
+    sources:
+      - src/components/jev/UnreadableBoard.tsx
+      - src/lib/jev/saved-board.ts
+
 internal:
   - path: src/app/api/health/route.ts
     reason: Ops health probe; the gate uses it to wait for `next start`, nobody sees it.

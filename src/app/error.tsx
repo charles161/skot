@@ -1,22 +1,8 @@
 "use client";
 
-import { BOARD_STORAGE_PREFIX, boardStorageKey } from "@/lib/jev/storage-keys";
 import { useEffect, useState } from "react";
-import { IconReset, IconTrash, IconWarning } from "@/brand/icons";
+import { IconPlus, IconReset, IconWarning } from "@/brand/icons";
 import { Button } from "@/components/ui/button";
-
-const VALID_ROOM_PATTERN = /^[a-zA-Z0-9_-]{3,64}$/;
-
-function getActiveRoomFromUrl(): string | null {
-  const hash = window.location.hash.startsWith("#")
-    ? window.location.hash.slice(1)
-    : window.location.hash;
-  const hashRoom = hash ? new URLSearchParams(hash).get("room") : null;
-  if (hashRoom && VALID_ROOM_PATTERN.test(hashRoom)) return hashRoom;
-  const queryRoom = new URLSearchParams(window.location.search).get("room");
-  if (queryRoom && VALID_ROOM_PATTERN.test(queryRoom)) return queryRoom;
-  return null;
-}
 
 function getErrorDigest(error: unknown): string | null {
   if (
@@ -28,38 +14,6 @@ function getErrorDigest(error: unknown): string | null {
     return (error as { digest: string }).digest;
   }
   return null;
-}
-
-function clearSavedBoardStorage(): number {
-  if (typeof window === "undefined") return 0;
-  let removed = 0;
-  try {
-    const activeRoom = getActiveRoomFromUrl();
-    if (activeRoom) {
-      const activeKey = boardStorageKey(activeRoom);
-      if (window.localStorage.getItem(activeKey) !== null) {
-        window.localStorage.removeItem(activeKey);
-        removed += 1;
-      }
-    }
-
-    if (removed === 0) {
-      const keysToRemove: string[] = [];
-      for (let i = 0; i < window.localStorage.length; i += 1) {
-        const key = window.localStorage.key(i);
-        if (key && key.startsWith(BOARD_STORAGE_PREFIX)) {
-          keysToRemove.push(key);
-        }
-      }
-      for (const key of keysToRemove) {
-        window.localStorage.removeItem(key);
-        removed += 1;
-      }
-    }
-  } catch {
-    // Ignore restricted/unavailable storage environments
-  }
-  return removed;
 }
 
 export default function AppError({
@@ -97,16 +51,10 @@ export default function AppError({
     }
   };
 
-  const handleResetLocalBoard = () => {
-    const removed = clearSavedBoardStorage();
-    setResetNotice(
-      removed > 0
-        ? "Cleared saved local board state. Reloading clean canvas…"
-        : "No saved local board found. Reloading clean canvas…"
-    );
-    window.setTimeout(() => {
-      window.location.reload();
-    }, 150);
+  // A new room, never a delete: the saved board may be someone's only copy.
+  const handleStartNewBoard = () => {
+    setResetNotice("Your saved board is untouched. Opening a new one. Press Back to return to it.");
+    window.setTimeout(() => window.location.assign(window.location.pathname), 150);
   };
 
   return (
@@ -130,9 +78,8 @@ export default function AppError({
         </div>
 
         <p className="mb-5 text-sm leading-relaxed text-muted-foreground">
-          Try reloading the canvas first. If the error keeps happening because
-          of corrupted local browser storage, reset the saved local board to
-          start fresh.
+          Try reloading the canvas first. If the error keeps happening, start a
+          new board: the saved one stays in this browser.
         </p>
 
         {resetNotice ? (
@@ -149,10 +96,10 @@ export default function AppError({
           <Button
             type="button"
             variant="outline"
-            onClick={handleResetLocalBoard}
+            onClick={handleStartNewBoard}
           >
-            <IconTrash className="h-4 w-4" aria-hidden="true" />
-            Reset local board
+            <IconPlus className="h-4 w-4" aria-hidden="true" />
+            Start a new board
           </Button>
         </div>
 

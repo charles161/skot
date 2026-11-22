@@ -153,11 +153,8 @@ import {
   RemoteChangeGuard,
   type PeerQuarantineIncident,
 } from "@/lib/jev/remote-guard";
-import {
-  MAX_BOARD_ELEMENTS,
-  parseStoredBoardSnapshot,
-  type StoredBoardSnapshot,
-} from "@/lib/jev/sync-validation";
+import { MAX_BOARD_ELEMENTS, type StoredBoardSnapshot } from "@/lib/jev/sync-validation";
+import { exceedsBoardLimit, readSavedBoard, writeSavedBoard, type SaveOutcome } from "@/lib/jev/saved-board";
 import {
   formatRoomHash,
   generateRoomCredentials,
@@ -189,6 +186,7 @@ import { PredictionHud } from "./PredictionHud";
 import { SelectionInspector } from "./SelectionInspector";
 import { ShareP2PDialog } from "./ShareP2PDialog";
 import { ThoughtBar } from "./ThoughtBar";
+import { UnreadableBoard } from "./UnreadableBoard";
 import { usePracticeSession } from "./usePracticeSession";
 import { usePacks } from "./use-packs";
 import { useMoves } from "./use-moves";
@@ -305,6 +303,20 @@ function reviewViewportMargins() {
     : { top: 130, right: 32, bottom: Math.round(window.innerHeight * 0.5), left: 32 };
 }
 
+const BOARD_FULL = {
+  tone: "error",
+  text: `A board holds ${MAX_BOARD_ELEMENTS} elements. Remove something first.`,
+} as const;
+const MERGE_TOO_BIG = {
+  tone: "error",
+  text: `Not merged: together the boards pass ${MAX_BOARD_ELEMENTS} elements. This board is unchanged.`,
+} as const;
+const NOT_SAVED: Record<Exclude<SaveOutcome, "saved">, string> = {
+  kept_unreadable: "Not saved: this board's saved copy can't be read, so it was left untouched. Use Save board (.json).",
+  would_not_load: "Not saved: this change couldn't be loaded back. Undo it, or use Save board (.json).",
+  storage_failed: "Not saved: this browser's storage refused it. Use Save board (.json) to keep a copy.",
+};
+
 function getBrowserStorage() {
   return typeof window !== "undefined" ? window.localStorage : null;
 }
@@ -328,6 +340,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   const [boardTitle, setBoardTitle] = useState(DEFAULT_BOARD_TITLE);
   const [elements, setElements] = useState<JevElement[]>([]);
   const [boardReady, setBoardReady] = useState(false);
+  const [unreadableSave, setUnreadableSave] = useState<string | null>(null);
   const [joiningSharedRoom, setJoiningSharedRoom] = useState(false);
   const [historyCounts, setHistoryCounts] = useState({ undo: 0, redo: 0 });
   const historyRef = useRef<BoardHistoryController | null>(null);
@@ -777,11 +790,13 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     let initialEls = elementsRef.current;
     let initialTitle = boardTitleRef.current;
     let restored = false;
+    let unreadable: string | null = null;
     try {
-      const saved = window.localStorage.getItem(boardStorageKey(rid));
-      if (saved) {
-        const parsed = parseStoredBoardSnapshot(saved);
-        if (parsed && (parsed.elements.length > 0 || parsed.hasLocalEdits)) {
+      const saved = readSavedBoard(window.localStorage.getItem(boardStorageKey(rid)));
+      if (saved.kind === "unreadable") unreadable = saved.raw;
+      if (saved.kind === "board") {
+        const parsed = saved.snapshot;
+        if (parsed.elements.length > 0 || parsed.hasLocalEdits) {
           initialEls = parsed.elements;
           if (parsed.boardTitle !== undefined) {
             initialTitle = parsed.boardTitle;
@@ -810,6 +825,16 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       }
     } catch {
       // ignore storage errors
+    }
+
+    if (unreadable !== null) {
+      // No room id and no peer session, so nothing can save over it.
+      const raw = unreadable;
+      const showTimer = window.setTimeout(() => setUnreadableSave(raw), 0);
+      return () => {
+        window.clearTimeout(showTimer);
+        throttler.cancel();
+      };
     }
 
     if (creds.createdNew) {
@@ -936,6 +961,10 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
           }
 
           const merged = evaluated.merged;
+          if (exceedsBoardLimit(elementsRef.current.length, merged.state.elements.length)) {
+            showBoardNotice(MERGE_TOO_BIG);
+            return;
+          }
           if (evaluated.recoveryEntry) {
             const savedList = pushRecoverySnapshot(
               storage,
@@ -1058,14 +1087,16 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       collab.destroy();
       collabRef.current = null;
     };
-  }, [importPending, fitToView, rankWithTypeSafeJev, getHistory, restorePractice]);
+  }, [importPending, fitToView, rankWithTypeSafeJev, getHistory, restorePractice, showBoardNotice]);
 
   // Persist to localStorage quietly (only once local edits exist or host state was synced/created)
   useEffect(() => {
     if (!roomId || !canPersistRef.current) return;
     const timer = window.setTimeout(() => {
+      let outcome: SaveOutcome = "storage_failed";
       try {
-        window.localStorage.setItem(
+        outcome = writeSavedBoard(
+          window.localStorage,
           boardStorageKey(roomId),
           JSON.stringify({
             elements,
@@ -1082,11 +1113,12 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
           })
         );
       } catch {
-        // ignore quota errors
+        // reading window.localStorage throws when the browser blocks it
       }
+      if (outcome !== "saved") showBoardNotice({ tone: "error", text: NOT_SAVED[outcome] });
     }, 350);
     return () => window.clearTimeout(timer);
-  }, [elements, boardTitle, roomId]);
+  }, [elements, boardTitle, roomId, showBoardNotice]);
 
   // Optional Live Collaborator Demo Peer animation
   useEffect(() => {
@@ -1215,9 +1247,8 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       const shouldBroadcast = opts?.broadcast ?? true;
       const prev = elementsRef.current;
       const rawNext = updater(prev);
-      if (rawNext.length > MAX_BOARD_ELEMENTS && rawNext.length > prev.length) {
-        // One more would save a board that cannot be loaded back.
-        showBoardNotice({ tone: "error", text: `A board holds ${MAX_BOARD_ELEMENTS} elements. Remove something first.` });
+      if (exceedsBoardLimit(prev.length, rawNext.length)) {
+        showBoardNotice(BOARD_FULL);
         return prev;
       }
       const peerId = collabRef.current?.peerId ?? "local";
@@ -2369,6 +2400,10 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       }
 
       if (anyChanged) {
+        if (exceedsBoardLimit(elementsRef.current.length, current.elements.length)) {
+          showBoardNotice(MERGE_TOO_BIG);
+          return;
+        }
         elementsRef.current = current.elements;
         boardTitleRef.current = current.boardTitle;
         titleRevRef.current = current.titleRev ?? 0;
@@ -2393,7 +2428,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       }
       announceStatus("Kept peer board changes");
     },
-    [getHistory, announceStatus]
+    [getHistory, announceStatus, showBoardNotice]
   );
 
   const handleRevertPeerChanges = useCallback(
@@ -3042,6 +3077,8 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     !thoughtPrompt.trim() &&
     !forkSession &&
     !aiQuiet;
+
+  if (unreadableSave !== null) return <UnreadableBoard raw={unreadableSave} />;
 
   return (
     <AiQuietContext value={aiQuiet}>
