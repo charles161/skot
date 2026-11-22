@@ -107,7 +107,7 @@ describe("Talk-to-Draw is removed (no talk/mic control, no V shortcut)", () => {
 
   it("the tool keymap still covers every drawing tool", () => {
     expect(
-      ["S", "H", "R", "D", "O", "C", "A", "F", "P", "T"].map((k) =>
+      ["S", "H", "R", "D", "O", "C", "A", "Z", "P", "T"].map((k) =>
         toolForShortcut({ key: k.toLowerCase(), code: `Key${k}`, altKey: true, ctrlKey: false, metaKey: false })
       )
     ).toEqual(["select", "hand", "node", "diamond", "database", "ellipse", "arrow", "frame", "freedraw", "text"]);

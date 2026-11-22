@@ -4,7 +4,8 @@ export type DockTool = Exclude<ToolType, (typeof HLD_SHAPE_KINDS)[number] | (typ
 
 /**
  * Tool shortcuts for the dock: Alt + the letter. A bare letter typed on the board is the start of a node name
- * and goes to the Thought Bar (Charles, 22 Nov 2026). Flyout kinds have no key.
+ * and goes to the Thought Bar (Charles, 22 Nov 2026). Flyout kinds have no key. Alt+F is Fork It and nothing
+ * else, so the Zone Frame tool is on Z.
  */
 export const TOOL_SHORTCUT_KEYS: Readonly<Record<DockTool, string>> = {
   select: "S",
@@ -14,7 +15,7 @@ export const TOOL_SHORTCUT_KEYS: Readonly<Record<DockTool, string>> = {
   database: "O",
   ellipse: "C",
   arrow: "A",
-  frame: "F",
+  frame: "Z",
   freedraw: "P",
   text: "T",
 };

@@ -348,7 +348,7 @@ export function SelectionInspector({
           <button
             type="button"
             onClick={onFork}
-            title="Fork into 3 architectural takes (F)"
+            title="Fork into 3 architectural takes (Alt+F)"
             className="inline-flex min-h-[36px] items-center gap-1 rounded-full bg-[#D94E28]/12 px-2.5 py-0.5 text-[11px] font-semibold text-[#C2411D] transition-colors hover:bg-[#D94E28] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-[#FF8562] dark:hover:text-white sm:min-h-0 sm:px-2"
           >
             <IconFork className="h-3 w-3" aria-hidden="true" />

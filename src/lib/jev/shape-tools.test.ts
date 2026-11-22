@@ -44,7 +44,7 @@ describe("keyboard: new kinds steal no keys", () => {
       database: "O",
       ellipse: "C",
       arrow: "A",
-      frame: "F",
+      frame: "Z",
       freedraw: "P",
       text: "T",
     });
@@ -78,6 +78,12 @@ describe("keyboard: bare letters are text, Alt+letter is a tool", () => {
     expect(toolForShortcut(key("ß", "KeyS", { altKey: true }))).toBe("select");
     expect(altLetter(key("ƒ", "KeyF", { altKey: true }))).toBe("F");
     expect(toolForShortcut(key("r", "KeyR", { altKey: true, metaKey: true }))).toBeNull();
+  });
+
+  // Round-2 judges, prod: Alt+F meant Fork It with a selection and the Zone Frame tool without.
+  it("Alt+F is Fork It only: no tool listens on F, the frame tool is Alt+Z", () => {
+    expect(toolForShortcut(key("ƒ", "KeyF", { altKey: true }))).toBeNull();
+    expect(toolForShortcut(key("Ω", "KeyZ", { altKey: true }))).toBe("frame");
   });
 
   it("letters of any script are text for the Thought Bar; digits, symbols and chords are not", () => {

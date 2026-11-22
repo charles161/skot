@@ -83,6 +83,7 @@ import {
   bestContextOption,
   placeContextOption,
   predictConcept,
+  scoreOptions,
   typingAnchor,
   type NextOptionsResult,
 } from "@/lib/jev/next-options";
@@ -335,12 +336,6 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   }, []);
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  /** The node the app selected after adding it. Only a selection the user made themselves anchors the next node. */
-  const [appSelectedId, setAppSelectedId] = useState<string | null>(null);
-  const userSelectedIds = useMemo(
-    () => (selectedIds.length === 1 && selectedIds[0] === appSelectedId ? [] : selectedIds),
-    [selectedIds, appSelectedId]
-  );
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [canvasInteracting, setCanvasInteracting] = useState(false);
   const [tool, setTool] = useState<ToolType>("select");
@@ -605,7 +600,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
           setPredictions((prev) => {
             // The panel moved on (the user typed, or picked something): this answer is for options no longer shown.
             if (prev.length !== pool.length || prev.some((p, i) => p.id !== pool[i].id)) return prev;
-            const scored = prev.map((p) => (probs && typeof probs[p.id] === "number" ? { ...p, probability: probs[p.id] } : p));
+            const scored = scoreOptions(prev, data.contextSuggestions ?? [], probs);
             return named ? placeContextOption(scored, activePredIdxRef.current, named) : scored;
           });
           setTelemetry({
@@ -1077,9 +1072,9 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     const text = thoughtPrompt.trim();
     if (!text) return null;
     if (isFlowText(text)) return null;
-    const anchor = typingAnchor(elements, text, userSelectedIds);
+    const anchor = typingAnchor(elements, text, selectedIds);
     return predictConcept(text, elements, anchor)?.completion ?? null;
-  }, [thoughtPrompt, elements, userSelectedIds]);
+  }, [thoughtPrompt, elements, selectedIds]);
 
   // Type-ahead: every keystroke shows what Enter will add (option 1, as a ghost) and two bigger options.
   useEffect(() => {
@@ -1097,7 +1092,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     const result = buildNextOptions({
       elements: elementsRef.current,
       text,
-      selectedIds: userSelectedIds,
+      selectedIds: selectedIds,
       subjectId: lastTouchedIdRef.current ?? undefined,
       viewportCenter: viewportCenterRef.current,
       viewport: viewportWorldRef.current,
@@ -1117,7 +1112,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     const keepMinimal = completedRef.current;
     completedRef.current = false;
     presentNextOptions(result, elementsRef.current, { keepMinimal, ask: false });
-  }, [thoughtPrompt, elements, userSelectedIds, forkSession, aiQuiet, presentNextOptions]);
+  }, [thoughtPrompt, elements, selectedIds, forkSession, aiQuiet, presentNextOptions]);
 
   const updateElements = useCallback(
     (
@@ -1291,10 +1286,10 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
    * the usual next steps. The order is the board's; jev only marks its pick.
    */
   const presentAfterCreate = useCallback(
-    (nodeId: string, anchorIds: string[], els: JevElement[]) => {
+    (nodeId: string, anchorIds: string[], els: JevElement[], userPicked = false) => {
       lastTouchedIdRef.current = nodeId;
       if (aiQuietRef.current) return;
-      const result = buildAfterCreateOptions({ elements: els, nodeId, anchorIds, viewportCenter: viewportCenterRef.current });
+      const result = buildAfterCreateOptions({ elements: els, nodeId, anchorIds, userPicked, viewportCenter: viewportCenterRef.current });
       if (!result) {
         setPredictions([]);
         setIntent(null);
@@ -1328,13 +1323,6 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     },
     [changeThought]
   );
-
-  /** The node the app just added or extended becomes the selection, without counting as the user's own pick. */
-  const focusNode = useCallback((id: string) => {
-    setAppSelectedId(id);
-    setSelectedIds([id]);
-    setInspectorOpen(false);
-  }, []);
 
   const dismissPredictions = useCallback(() => {
     const active = predictions[activePredIdx] ?? predictions[0];
@@ -1449,13 +1437,14 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         setIntent(null);
         return;
       }
-      focusNode(nextFocus.id);
+      // The selection is the user's alone: a node the app adds or extends is never selected for them, so the
+      // handles on the board always mean "the next node lands beside this".
       // An accepted link: offer what else the node could connect to before moving on to bigger steps.
       const acceptedLink = pred.category === "connect" && !pred.tier && placed.length === 0;
       if (acceptedLink) presentAfterCreate(nextFocus.id, [], nextElsSnapshot);
       else presentSubjectOptions(nextFocus.id, nextElsSnapshot);
     },
-    [updateElements, presentSubjectOptions, presentAfterCreate, focusNode, pushEditDelta, ensureElementsVisible]
+    [updateElements, presentSubjectOptions, presentAfterCreate, pushEditDelta, ensureElementsVisible]
   );
 
   const applyPrediction = useCallback(
@@ -1483,7 +1472,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       const input = {
         elements: elementsRef.current,
         text: prompt,
-        selectedIds: userSelectedIds,
+        selectedIds: selectedIds,
         viewportCenter: viewportCenterRef.current,
         viewport: viewportWorldRef.current,
       };
@@ -1508,19 +1497,17 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       typedTextRef.current = "";
       setThoughtPrompt("");
       ensureElementsVisible([node], { top: 104, right: 64, bottom: 255, left: 64 }, { keepBoard: true });
-      focusNode(node.id);
       announceStatus(`Added ${node.label}`);
-      presentAfterCreate(node.id, plan.anchorIds, next);
+      presentAfterCreate(node.id, plan.anchorIds, next, plan.userPicked);
     },
     [
       predictions,
       activePredIdx,
-      userSelectedIds,
+      selectedIds,
       applyAction,
       updateElements,
       pushEditDelta,
       ensureElementsVisible,
-      focusNode,
       announceStatus,
       presentAfterCreate,
     ]
@@ -1543,12 +1530,9 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       });
       fitToView(parsed.elements, { top: 104, right: 64, bottom: 255, left: 64 });
       const focus = parsed.focusId ? combined.find((e) => e.id === parsed.focusId) : undefined;
-      if (focus) {
-        focusNode(focus.id);
-        if (!aiQuietRef.current) presentSubjectOptions(focus.id, combined);
-      }
+      if (focus && !aiQuietRef.current) presentSubjectOptions(focus.id, combined);
     },
-    [updateElements, pushEditDelta, fitToView, presentSubjectOptions, focusNode]
+    [updateElements, pushEditDelta, fitToView, presentSubjectOptions]
   );
 
   /** Thought Bar Tab: first complete a partial word ("api" -> "API Gateway"), then cycle the three options. */
@@ -2440,6 +2424,12 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
           return;
         }
       }
+      if (altLetter(e) === "F") {
+        // Alt+F is Fork It and nothing else: with nothing to fork it says so instead of doing something different.
+        e.preventDefault();
+        if (!aiQuiet) announceStatus("Select a node first: Alt+F forks the selection");
+        return;
+      }
       const shortcutTool = toolForShortcut(e);
       if (shortcutTool) {
         e.preventDefault();
@@ -2720,7 +2710,6 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       forkAbortRef.current?.abort();
       setForkSession(null);
     }
-    setAppSelectedId(null);
     setSelectedIds(ids);
     setInspectorOpen(ids.length === 1);
     selectionTriggerRef.current?.select(ids);

@@ -78,7 +78,7 @@ describe("practice mode: every AI surface reads the one aiQuiet flag", () => {
     ).toBe("");
   });
 
-  it("Fork is off: the handler refuses, Alt+F falls through to the frame tool, and no Fork button or HUD renders", () => {
+  it("Fork is off: the handler refuses, Alt+F does nothing, and no Fork button or HUD renders", () => {
     expect(between(workspace, "const startForkSelection = useCallback", "const applyForkTake")).toMatch(QUIET_RETURN);
     expect(workspace).toMatch(/altLetter\(e\) === "F" && selectedIds\.length > 0 && !aiQuiet/);
     expect(workspace).toMatch(/onFork=\{aiQuiet \? undefined : \(\) => (void )?startForkSelection\(\)\}/);

@@ -84,6 +84,15 @@ def test_type_anywhere(page, skot, evidence):
     assert active_tool(page).startswith("Decision tool")
     page.keyboard.press("Alt+s")
 
+    # Round-2 judges, prod: with nothing selected Alt+F turned the Zone Frame tool on. Alt+F is Fork It only.
+    page.keyboard.press("Alt+f")
+    page.wait_for_timeout(200)
+    assert active_tool(page).startswith("Select tool") and page.locator(FORK_PRESSURE).count() == 0, \
+        "Alt+F with nothing selected must do nothing: %s" % active_tool(page)
+    page.keyboard.press("Alt+z")
+    assert active_tool(page).startswith("Zone Frame tool (Alt+Z)"), active_tool(page)
+    page.keyboard.press("Alt+s")
+
     # Fork It: Alt+F on a selection, and its button. A bare f is a letter.
     click_node(skot, "App")
     page.keyboard.type("f")

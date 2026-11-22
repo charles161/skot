@@ -1368,10 +1368,12 @@ export function buildAfterCreateOptions(input: {
   elements: JevElement[];
   nodeId: string;
   anchorIds?: string[];
+  /** The user had selected the anchors themselves. */
+  userPicked?: boolean;
   viewportCenter?: Point;
 }): NextOptionsResult | null {
   const next = buildNextOptions({ elements: input.elements, subjectId: input.nodeId, viewportCenter: input.viewportCenter });
-  const links = connectionOptions({ elements: input.elements, nodeId: input.nodeId, anchorIds: input.anchorIds });
+  const links = connectionOptions({ elements: input.elements, nodeId: input.nodeId, anchorIds: input.anchorIds, userPicked: input.userPicked });
   if (links.length === 0) return next;
   // The links are already offered above: a next step that is only another link would say the same thing twice.
   const steps = (next?.options ?? []).filter((o) => o.addElements.some((e) => e.kind !== "arrow"));
@@ -1452,6 +1454,25 @@ export function bestContextOption(
     addElements: [node, makeLink(subject.id, node.id, edge)],
     focusId: node.id,
   };
+}
+
+/**
+ * jev's scores written onto the options. A board-named suggestion whose name an option already offers is the
+ * same answer, so its score goes to that option rather than being lost.
+ */
+export function scoreOptions(
+  options: PredictedAction[],
+  suggestions: ContextSuggestion[],
+  scores: Record<string, number> | null
+): PredictedAction[] {
+  if (!scores) return options;
+  return options.map((o) => {
+    const offered = o.addElements.filter((e) => e.kind !== "arrow").map((e) => norm(e.label));
+    const same = suggestions.filter((s) => offered.length === 1 && norm(s.label) === offered[0]).map((s) => scores[s.id] ?? 0);
+    const own = scores[o.id];
+    const best = Math.max(typeof own === "number" ? own : -1, ...same);
+    return best >= 0 ? { ...o, probability: best } : o;
+  });
 }
 
 /**

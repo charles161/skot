@@ -9,6 +9,7 @@ import {
   buildNextOptions,
   placeContextOption,
   predictConcept,
+  scoreOptions,
 } from "@/lib/jev/next-options";
 import type { PredictedAction } from "@/lib/jev/types";
 import type { JevElement, ShapeKind } from "@/lib/jev/types";
@@ -59,7 +60,9 @@ describe("the node is named what the user typed", () => {
     ["s3", "S3"],
     ["x", "X"],
     ["Api gateway", "API Gateway"],
-    ["payments with stripe and a ledger", "Payments with Stripe and a Ledger"],
+    ["payments with stripe and a ledger", "Payments with stripe and a ledger"],
+    ["user uploads a photo, a worker stores it in s3", "User uploads a photo, a worker stores it in S3"],
+    ["orders read replica", "Orders Read Replica"],
     ["the cache", "The Cache"],
   ])("%s -> %s", (typed, label) => {
     expect(typedNodeLabel(typed)).toBe(label);
@@ -155,11 +158,23 @@ describe("placement: free space beside the selected, related or last node", () =
     expect(node.x + node.width).toBeLessThan(gateway.x);
   });
 
-  it("ignores nodes that are off screen and uses the view instead", () => {
+  // Round-2 judge, prod: "a node added after panning lands alone in the middle of the view, far from related nodes".
+  it("stays with its related node even when the view has panned away (the camera brings it back)", () => {
     const viewport = { x: 5000, y: 5000, width: 1400, height: 700 };
     const { node, anchorId } = plan("billing", chain, { lastFocusedId: "pg", viewportCenter: { x: 5700, y: 5350 }, viewport });
-    expect(anchorId).toBeNull();
-    expect(node.x).toBeGreaterThan(5000);
+    expect(anchorId).toBe("gw");
+    expect(gapBetween(node, gateway)).toBeLessThanOrEqual(200);
+  });
+
+  // Round-2 judges, prod: Billing landed beside the CDN and "CDN → Billing" was the default, against jev's
+  // 81% for API Gateway → Billing; Kafka was offered "Kafka → Read Replica · replicates".
+  it("places a node beside the node that most plausibly feeds it, not just the nearest of its kind", () => {
+    const cdn = el({ id: "cdn", label: "CDN", kind: "lb", x: 100, y: 436, width: 168, height: 80 });
+    const board = [...chain, cdn];
+    expect(plan("billing", board, { lastFocusedId: "cdn" }).anchorId).toBe("gw");
+    expect(plan("kafka", board, { lastFocusedId: "pg" }).anchorId).toBe("gw");
+    expect(plan("read replica", board, { lastFocusedId: "cdn" }).anchorId).toBe("pg");
+    expect(plan("zorblax", board, { lastFocusedId: "cdn" }).anchorId).toBe("cdn");
   });
 
   // Judge on prod, 22 Nov: with API Gateway selected, six new nodes piled into one tall column around Postgres.
@@ -273,6 +288,55 @@ describe("connections are offered after the node exists, never applied", () => {
     expect(first.focusId).toBe("new");
   });
 
+  const titlesFor = (label: string, kind: ShapeKind, board: JevElement[], extra: Partial<Parameters<typeof connectionOptions>[0]> = {}) =>
+    connectionOptions({ elements: [...board, fresh(label, kind, 1000, 600)], nodeId: "new", ...extra }).map(
+      (o) => `${o.title} · ${o.addElements[0].label}`
+    );
+  const cdnNode = el({ id: "cdn", label: "CDN", kind: "lb", x: 100, y: 436, width: 168, height: 80 });
+  const replica = el({ id: "rr", label: "Read Replica", kind: "database", x: 950, y: 293, width: 156, height: 86 });
+
+  it("puts the link that follows the usual flow first: API Gateway → Billing ahead of CDN → Billing", () => {
+    const titles = titlesFor("Billing", "node", [...chain, cdnNode], { anchorIds: ["cdn"] });
+    expect(titles[0]).toMatch(/^API Gateway → Billing/);
+  });
+
+  it("offers Kafka the node that publishes to it, never a replica or the database", () => {
+    const titles = titlesFor("Kafka", "queue", [...chain, replica], { anchorIds: ["rr"] });
+    expect(titles[0]).toBe("API Gateway → Kafka · publishes to");
+    expect(titles.join(" | ")).not.toMatch(/Read Replica|Postgres/);
+  });
+
+  it("knows the catalog's own links, with their words: Postgres → Read Replica · replicates", () => {
+    expect(titlesFor("Read Replica", "database", chain, { anchorIds: ["app"] })[0]).toBe("Postgres → Read Replica · replicates");
+    expect(titlesFor("Redis", "cache", chain, { anchorIds: ["pg"] })[0]).toBe("Redis → Postgres · on miss");
+  });
+
+  it("drops a loose pairing when the board has a clearly better one", () => {
+    const titles = titlesFor("CDN", "lb", chain, { anchorIds: ["app"] });
+    expect(titles[0]).toBe("App → CDN · assets");
+    expect(titles.join(" | ")).not.toMatch(/Postgres/);
+  });
+
+  // Round-2 judge, prod: "Auth Service → Queue" was offered over the Web Server the user had clicked.
+  it("puts the node the user had selected first, whatever else is related", () => {
+    const auth = el({ id: "auth", label: "Auth Service", x: 400, y: 500 });
+    const web = el({ id: "web", label: "Web Server", x: 700, y: 500 });
+    const titles = titlesFor("Queue", "queue", [auth, web], { anchorIds: ["web"], userPicked: true });
+    expect(titles[0]).toMatch(/^Web Server → Queue/);
+  });
+
+  it("links a name it does not know only to the node it was placed beside, with a plain verb", () => {
+    expect(titlesFor("Zorblax", "node", chain, { anchorIds: ["pg"] })).toEqual(["Zorblax → Postgres · writes to"]);
+    const story = "User uploads a photo, a worker stores it in S3";
+    expect(titlesFor(story, "node", chain, { anchorIds: ["gw"] })).toEqual([`API Gateway → ${story} · `]);
+  });
+
+  it("never shows two options that read the same", () => {
+    const twin = el({ id: "gw2", label: "API Gateway", kind: "lb", x: 400, y: 500, width: 168, height: 80 });
+    const titles = connectionOptions({ elements: [...chain, twin, fresh("Billing", "node", 700, 500)], nodeId: "new", anchorIds: [] }).map((o) => o.title);
+    expect(new Set(titles).size).toBe(titles.length);
+  });
+
   it("orients by the usual flow: API Gateway -> Postgres even though Postgres was added last", () => {
     const node = fresh("Postgres", "database", 700, 293);
     const options = connectionOptions({ elements: [app, gateway, arrow("a1", "app", "gw"), node], nodeId: "new", anchorIds: ["gw"] });
@@ -290,15 +354,17 @@ describe("connections are offered after the node exists, never applied", () => {
     const board = [app, gateway, postgres, arrow("a1", "app", "gw"), arrow("a2", "gw", "pg")];
     const created = planTypedNode({ text: "billing", elements: board, selectedIds: ["app", "pg"], viewportCenter: CENTER })!;
     expect(created.anchorIds).toEqual(["app", "pg"]);
-    const options = connectionOptions({ elements: [...board, created.node], nodeId: created.node.id, anchorIds: created.anchorIds });
+    expect(created.userPicked).toBe(true);
+    const options = connectionOptions({ elements: [...board, created.node], nodeId: created.node.id, anchorIds: created.anchorIds, userPicked: created.userPicked });
     const ends = options.map((o) => [o.addElements[0].fromId, o.addElements[0].toId].find((id) => id !== created.node.id));
     expect(ends).toEqual(expect.arrayContaining(["app", "pg"]));
   });
 
-  it("labels the link with the usual word for what flows into the target", () => {
-    const node = fresh("Postgres", "database", 700, 293);
-    const [first] = connectionOptions({ elements: [app, gateway, node], nodeId: "new", anchorIds: ["gw"] });
-    expect(first.addElements[0].label).toBe("SQL");
+  it("labels a link the catalog knows with its word, any other with a plain verb", () => {
+    const [known] = connectionOptions({ elements: [app, fresh("API Gateway", "lb", 400, 296)], nodeId: "new", anchorIds: ["app"] });
+    expect(known.addElements[0].label).toBe("HTTPS");
+    const [loose] = connectionOptions({ elements: [app, gateway, fresh("Postgres", "database", 700, 293)], nodeId: "new", anchorIds: ["gw"] });
+    expect(loose.addElements[0].label).toBe("writes to");
   });
 
   // Judge on prod, 22 Nov: with three Postgres nodes the top two suggestions were both "Postgres → Postgres".
@@ -317,7 +383,7 @@ describe("connections are offered after the node exists, never applied", () => {
   // Second judge on prod, 22 Nov: a ghost arrow ran through the node in between, its label over that node's name.
   it("offers a link that crosses another node as a bare line, without a label on top of that node", () => {
     const far = el({ id: "new", label: "Search", x: 1000, y: 300 });
-    const options = connectionOptions({ elements: [app, gateway, postgres, far], nodeId: "new", anchorIds: ["app"] });
+    const options = connectionOptions({ elements: [app, gateway, postgres, far], nodeId: "new", anchorIds: ["app"], userPicked: true });
     const crossing = options.find((o) => o.addElements[0].fromId === "app" || o.addElements[0].toId === "app")!;
     expect(crossing.addElements[0].label).toBe("");
     const beside = connectionOptions({ elements: [app, { ...far, x: 400 }], nodeId: "new", anchorIds: ["app"] });
@@ -492,6 +558,17 @@ describe("the node the AI names from the board", () => {
     const offered = local()[0].addElements.find((e) => e.kind !== "arrow")!.label;
     const junk = [named("ctx_0", "App"), named("ctx_1", offered), named("ctx_2", "Next Step"), { id: "nope", label: "X", kind: "node" as const }];
     expect(bestContextOption(junk, null, gateway, board, local())).toBeNull();
+  });
+
+  // Prod, 22 Nov: jev's pick was a board-named "API Gateway" that option 1 already offered, so the badge fell
+  // on another option at "jev pick 10%".
+  it("credits jev's score for a name that is already offered to the option that offers it", () => {
+    const options = buildNextOptions({ elements: [app], subjectId: "app", viewportCenter: CENTER })!.options;
+    expect(options[0].title).toBe("API Gateway");
+    const scores = { [options[0].id]: 0.05, [options[1].id]: 0.1, [options[2].id]: 0.05, ctx_0: 0.8 };
+    const scored = scoreOptions(options, [named("ctx_0", "api gateway")], scores);
+    expect(scored.map((o) => o.probability)).toEqual([0.8, 0.1, 0.05]);
+    expect(scoreOptions(options, [], null).map((o) => o.probability)).toEqual([undefined, undefined, undefined]);
   });
 
   const opt = (id: string, nodes: number, tier?: PredictedAction["tier"]): PredictedAction => ({

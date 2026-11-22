@@ -8,7 +8,18 @@
  * always give the same board.
  */
 import { inferToneFromLabel } from "./colors";
-import { CATALOG, componentByExactName, NEXT_ROLES, norm, roleOf, words } from "./component-catalog";
+import {
+  BY_KEY,
+  CATALOG,
+  componentByExactName,
+  componentForLabel,
+  NEXT_ROLES,
+  norm,
+  roleOf,
+  words,
+  type LabeledNode,
+  type Role,
+} from "./component-catalog";
 import { getElementCenter, isShapeElement, makeSeed, rectsOverlap, uid, type Rect } from "./geometry";
 import { arrowHitsShape } from "./ghost-geometry";
 import { DEFAULT_KIND_SIZE, isComponentShape, isContainerKind } from "./notation-kinds";
@@ -95,25 +106,29 @@ const PERSON_WORDS = new Set(
   "user users customer customers client clients actor admin person people visitor shopper buyer seller driver rider operator member guest".split(" ")
 );
 const SMALL_WORDS = new Set("a an and as at by for from in of on or the to via with".split(" "));
+/** Up to this many words is a name (Title Case, a shape and a role from its words); more is a sentence. */
+const NAME_WORDS = 3;
 export const MAX_TYPED_LABEL = 120;
 
 /**
  * The node is named what the user typed. Only the capitals are tidied: the catalog's own spelling when the
  * text is exactly a catalog name ("api gateway" is "API Gateway"), known acronyms upper-cased, other
- * lower-case words capitalised (small joining words inside a phrase stay small). A word the user capitalised
- * themselves is left alone.
+ * lower-case words capitalised (small joining words inside a phrase stay small). A sentence only gets its
+ * first capital. A word the user capitalised themselves is left alone.
  */
 export function typedNodeLabel(text: string): string {
   const raw = text.replace(/\s+/g, " ").trim().slice(0, MAX_TYPED_LABEL).trim();
   if (!raw) return "";
   const named = CATALOG.find((c) => norm(c.label) === norm(raw));
   if (named) return named.label;
-  return raw
-    .split(" ")
+  const parts = raw.split(" ");
+  const sentence = parts.length > NAME_WORDS;
+  return parts
     .map((word, i) => {
-      if (/[A-Z]/.test(word) && !ACRONYMS.has(word.toLowerCase())) return word;
-      if (i > 0 && SMALL_WORDS.has(word)) return word;
-      if (ACRONYMS.has(word.toLowerCase())) return word.toUpperCase();
+      const bare = word.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (ACRONYMS.has(bare)) return word.toUpperCase();
+      if (/[A-Z]/.test(word)) return word;
+      if (i > 0 && (sentence || SMALL_WORDS.has(word))) return word;
       return cleanSemanticLabel(word) || word;
     })
     .join(" ");
@@ -125,10 +140,60 @@ export function typedNodeLabel(text: string): string {
  */
 function typedNodeKind(label: string): ShapeKind {
   const ws = words(label);
-  if (ws.length > 3) return "node";
+  if (ws.length > NAME_WORDS) return "node";
   if (ws.length > 0 && PERSON_WORDS.has(ws[ws.length - 1])) return "actor";
   const kind = kindForLabel(label);
   return kind === "actor" ? "node" : kind;
+}
+
+// ------------------------------------------------------------------ who feeds whom
+
+/** Who may reasonably point at a node of each role, beyond the usual next step (a gateway may write to a store). */
+const LOOSE_FEEDERS: Record<Role, Role[]> = {
+  client: [],
+  edge: ["client", "edge"],
+  service: ["edge", "client", "service", "queue"],
+  worker: ["queue", "service"],
+  queue: ["service", "edge", "worker", "external"],
+  cache: ["service", "edge", "worker"],
+  store: ["service", "worker", "edge"],
+  storage: ["service", "worker", "edge"],
+  external: ["service", "worker"],
+};
+
+const isSentence = (n: LabeledNode) => words(n.label).length > NAME_WORDS;
+/** A sentence has no role: one of its words would be a guess. */
+const flowRole = (n: LabeledNode): Role | null => (isSentence(n) ? null : roleOf(n));
+
+interface Flow {
+  /** 0 = no reason to link; higher = a more usual link. */
+  strength: number;
+  /** The catalog's own word for this exact link ("HTTPS", "replicates"), when it knows the pair. */
+  label?: string;
+}
+
+/**
+ * How usual an arrow from `from` to `to` is: the catalog draws exactly this link (9), the usual next step by
+ * role where `from` is known to feed that kind of node (7) or by role alone (6), a looser but sound pairing
+ * (4), nothing (0). Depends only on the two names and kinds.
+ */
+function flow(from: LabeledNode, to: LabeledNode): Flow {
+  const a = flowRole(from) ? componentForLabel(from.label) : null;
+  const b = flowRole(to) ? componentForLabel(to.label) : null;
+  const direct = a && b ? a.links.find((l) => l.key === b.key && !l.viaUpstream) : undefined;
+  if (direct) return { strength: 9, label: direct.edge };
+  const ra = flowRole(from);
+  const rb = flowRole(to);
+  if (!ra || !rb) return { strength: 0 };
+  if (NEXT_ROLES[ra].includes(rb)) return { strength: a?.links.some((l) => BY_KEY.get(l.key)?.role === rb) ? 7 : 6 };
+  return { strength: LOOSE_FEEDERS[rb].includes(ra) ? 4 : 0 };
+}
+
+/** The better direction for a link between a board node and the new node, with its strength and word. */
+function bestFlow(other: LabeledNode, node: LabeledNode): Flow & { otherFeeds: boolean } {
+  const into = flow(other, node);
+  const out = flow(node, other);
+  return out.strength > into.strength ? { ...out, otherFeeds: false } : { ...into, otherFeeds: true };
 }
 
 // ------------------------------------------------------------------ placement
@@ -156,6 +221,8 @@ interface Anchor {
   side: "right" | "left";
   /** Every selected node, when the anchor is a multi-selection. */
   group?: string[];
+  /** The user selected the anchor themselves. */
+  picked?: boolean;
   /**
    * The new node goes straight under the anchor first: a copy under its twin, and every node on a view too
    * narrow for two columns (a phone), where a row would run off the screen.
@@ -249,7 +316,7 @@ export interface TypedNodeInput {
   /** The node the user touched last (added, applied, renamed). */
   lastFocusedId?: string | null;
   viewportCenter: Point;
-  /** The visible part of the board, in board coordinates. Nodes outside it are not used as anchors. */
+  /** The visible part of the board, in board coordinates: on a phone-sized view a row must not run off it. */
   viewport?: Rect;
 }
 
@@ -261,21 +328,18 @@ export interface TypedNodePlan {
   anchorIds: string[];
   /** The node sits right next to its anchor ("beside"); false when that slot was taken ("near"). */
   adjacent: boolean;
+  /** The user had selected the anchor(s): their link is offered first, whatever else is related. */
+  userPicked: boolean;
 }
 
 function pickAnchor(input: TypedNodeInput, label: string, kind: ShapeKind): Anchor | null {
   const shapes = input.elements.filter(isObstacle).filter((e) => e.kind !== "freedraw");
   const byId = new Map(shapes.map((s) => [s.id, s]));
-  const inView = (e: JevElement) => {
-    if (!input.viewport) return true;
-    const c = getElementCenter(e);
-    const v = input.viewport;
-    return c.x >= v.x && c.x <= v.x + v.width && c.y >= v.y && c.y <= v.y + v.height;
-  };
   const rectOf = (e: JevElement): Rect => ({ x: e.x, y: e.y, width: e.width, height: e.height });
 
+  // 1. What the user selected.
   const selected = (input.selectedIds ?? []).map((id) => byId.get(id)).filter((e): e is JevElement => Boolean(e));
-  if (selected.length === 1) return { id: selected[0].id, rect: rectOf(selected[0]), side: "right" };
+  if (selected.length === 1) return { id: selected[0].id, rect: rectOf(selected[0]), side: "right", picked: true };
   if (selected.length > 1) {
     const x = Math.min(...selected.map((s) => s.x));
     const y = Math.min(...selected.map((s) => s.y));
@@ -286,43 +350,40 @@ function pickAnchor(input: TypedNodeInput, label: string, kind: ShapeKind): Anch
       rect: { x, y, width: right - x, height: bottom - y },
       side: "right",
       group: selected.map((s) => s.id),
+      picked: true,
     };
   }
 
-  const visible = shapes.filter(inView);
-  const twins = visible.filter((s) => norm(s.label) === norm(label));
+  // 2. A node with the same name: the copy goes under it.
+  const twins = shapes.filter((s) => norm(s.label) === norm(label));
   if (twins.length > 0) {
     const twin = twins[twins.length - 1];
     return { id: twin.id, rect: rectOf(twin), side: "right", stack: true };
   }
-  const focused = input.lastFocusedId ? visible.find((s) => s.id === input.lastFocusedId) ?? null : null;
-  const near = focused ? getElementCenter(focused) : input.viewportCenter;
-  const nearest = (pool: JevElement[]) =>
-    pool.reduce<JevElement | null>((best, s) => {
-      if (!best) return s;
-      const d = (e: JevElement) => Math.hypot(getElementCenter(e).x - near.x, getElementCenter(e).y - near.y);
-      return d(s) < d(best) ? s : best;
-    }, null);
 
-  // Related by role: what feeds this node goes on its left, what it feeds goes on its right.
-  const role = roleOf({ label, kind });
-  if (role) {
-    const components = visible.filter(isComponentShape);
-    const feeds = components.filter((s) => {
-      const r = roleOf(s);
-      return r !== null && NEXT_ROLES[r].includes(role);
-    });
-    const upstream = (focused && feeds.includes(focused) ? focused : null) ?? nearest(feeds);
-    if (upstream) return { id: upstream.id, rect: rectOf(upstream), side: "right" };
-    const fed = components.filter((s) => {
-      const r = roleOf(s);
-      return r !== null && NEXT_ROLES[role].includes(r);
-    });
-    const downstream = (focused && fed.includes(focused) ? focused : null) ?? nearest(fed);
-    if (downstream) return { id: downstream.id, rect: rectOf(downstream), side: "left" };
+  const focused = input.lastFocusedId ? byId.get(input.lastFocusedId) ?? null : null;
+  const near = focused ? getElementCenter(focused) : input.viewportCenter;
+  const distance = (e: JevElement) => Math.hypot(getElementCenter(e).x - near.x, getElementCenter(e).y - near.y);
+
+  // 3. The node it most usually links with: what feeds it goes on its left, what it feeds on its right.
+  const related = shapes
+    .filter(isComponentShape)
+    .map((other) => ({ other, ...bestFlow(other, { label, kind }) }))
+    .filter((r) => r.strength > 0)
+    .sort(
+      (x, y) =>
+        y.strength - x.strength ||
+        Number(y.otherFeeds) - Number(x.otherFeeds) ||
+        Number(y.other === focused) - Number(x.other === focused) ||
+        distance(x.other) - distance(y.other)
+    );
+  if (related.length > 0) {
+    const { other, otherFeeds } = related[0];
+    return { id: other.id, rect: rectOf(other), side: otherFeeds ? "right" : "left" };
   }
 
-  const fallback = focused ?? nearest(visible);
+  // 4. The last node touched, else the node nearest the middle of the view.
+  const fallback = focused ?? shapes.reduce<JevElement | null>((best, s) => (!best || distance(s) < distance(best) ? s : best), null);
   return fallback ? { id: fallback.id, rect: rectOf(fallback), side: "right" } : null;
 }
 
@@ -354,6 +415,7 @@ export function planTypedNode(input: TypedNodeInput): TypedNodePlan | null {
     anchorId: anchor?.id ?? null,
     anchorIds: anchor ? anchor.group ?? [anchor.id] : [],
     adjacent: slot.adjacent,
+    userPicked: Boolean(anchor?.picked),
   };
 }
 
@@ -388,13 +450,17 @@ export interface ConnectionInput {
   nodeId: string;
   /** The node it was placed beside, or the nodes that were selected when it was added. */
   anchorIds?: string[];
+  /** The user had selected the anchors themselves: those links come first. */
+  userPicked?: boolean;
   max?: number;
 }
 
 /**
- * Links between the new node and the board, best first: a pair that follows the usual flow (client to edge to
- * service to data), then the node it was placed beside, then the closest node. The order depends only on the
- * board, so the highlighted link is the same every time; jev's ranking is shown on top of it, never instead.
+ * Links between the new node and the board, best first: a node the user had selected, then the most usual
+ * link (the catalog's own pairs, then the usual flow by role, then looser but sound pairings). A node whose
+ * name says nothing is offered only the node it was placed beside (or, with none, its closest neighbour).
+ * The order depends only on the board, so the highlighted link is the same every time; jev's score is shown
+ * on top of it, never instead.
  */
 export function connectionOptions(input: ConnectionInput): PredictedAction[] {
   const node = input.elements.find((e) => e.id === input.nodeId);
@@ -408,37 +474,59 @@ export function connectionOptions(input: ConnectionInput): PredictedAction[] {
   const others = input.elements.filter(
     (e) => isComponentShape(e) && e.id !== node.id && !linked.has(e.id) && norm(e.label) !== norm(node.label)
   );
-  const role = roleOf(node);
   const here = getElementCenter(node);
   const byId = new Map(input.elements.map((e) => [e.id, e]));
   const solid = input.elements.filter((e) => isObstacle(e) && e.kind !== "freedraw");
   const scored = others.map((other, index) => {
-    const r = roleOf(other);
-    const feedsNode = Boolean(r && role && NEXT_ROLES[r].includes(role));
-    const fedByNode = Boolean(r && role && NEXT_ROLES[role].includes(r));
-    const distance = Math.hypot(getElementCenter(other).x - here.x, getElementCenter(other).y - here.y);
-    const related = feedsNode || fedByNode;
+    const usual = bestFlow(other, node);
     const isAnchor = input.anchorIds?.includes(other.id) ?? false;
-    const [from, to] = feedsNode ? [other, node] : fedByNode ? [node, other] : orientPair(other, node);
-    return { other, index, from, to, related, isAnchor, distance, score: (related ? 4 : 0) + (isAnchor ? 2 : 0) };
+    const [from, to] = usual.strength > 0 ? (usual.otherFeeds ? [other, node] : [node, other]) : orientPair(other, node);
+    return {
+      other,
+      index,
+      from,
+      to,
+      isAnchor,
+      strength: usual.strength,
+      feeds: usual.strength > 0 && usual.otherFeeds,
+      // A sentence gets a bare arrow: a verb picked from one of its words would be a guess.
+      label: usual.label ?? (isSentence(from) || isSentence(to) ? "" : relationVerb(from, to)),
+      distance: Math.hypot(getElementCenter(other).x - here.x, getElementCenter(other).y - here.y),
+    };
   });
-  // With no related node and no anchor, an unconnected node is offered its closest neighbour.
+  const anyUsual = scored.some((s) => s.strength > 0);
   const closest = scored.reduce<number>((best, s) => Math.min(best, s.distance), Infinity);
-  const lonely = linked.size === 0 && !scored.some((s) => s.related || s.isAnchor);
-  return scored
-    .filter((s) => s.related || s.isAnchor || (lonely && s.distance === closest))
-    .sort((a, b) => b.score - a.score || a.distance - b.distance || a.index - b.index)
+  const anyAnchor = scored.some((s) => s.isAnchor);
+  // A weaker pairing is only worth showing when nothing clearly better is on the board.
+  const top = scored.reduce<number>((best, s) => Math.max(best, s.strength), 0);
+  const offered = scored.filter(
+    (s) =>
+      (s.strength > 0 && s.strength >= top - 2) ||
+      (s.isAnchor && (input.userPicked || !anyUsual)) ||
+      (!anyUsual && !anyAnchor && linked.size === 0 && s.distance === closest)
+  );
+  // What feeds the new node comes before what it feeds, at equal strength: the arrow into it is the one missing.
+  const rank = (s: (typeof scored)[number]) =>
+    (input.userPicked && s.isAnchor ? 1000 : 0) + s.strength * 10 + (s.feeds ? 2 : 0) + (s.isAnchor ? 1 : 0);
+  const seen = new Set<string>();
+  return offered
+    .sort((a, b) => rank(b) - rank(a) || a.distance - b.distance || a.index - b.index)
+    .filter((s) => {
+      // Two links that would read the same (the board has two nodes of that name): the nearer one is enough.
+      const title = `${norm(s.from.label)}>${norm(s.to.label)}`;
+      if (seen.has(title)) return false;
+      seen.add(title);
+      return true;
+    })
     .slice(0, input.max ?? 3)
-    .map(({ from, to }) => {
-      // The catalog's own word for what flows into the target ("HTTPS", "SQL"), else a plain verb.
-      const verb = componentByExactName(to.label)?.inbound ?? relationVerb(from, to);
+    .map(({ from, to, label }) => {
       // An arrow that has to pass another node is offered as a bare line: its label would sit on that node.
-      const link = makeLink(from.id, to.id, verb);
+      const link = makeLink(from.id, to.id, label);
       const crosses = arrowHitsShape(link, byId, solid, 4) !== null;
       return {
         id: uid("pred"),
         title: `${from.label || from.kind} → ${to.label || to.kind}`,
-        subtitle: `connect · ${verb}`,
+        subtitle: label ? `connect · ${label}` : "connect",
         category: "connect" as const,
         nodeCount: 0,
         source: "board" as const,
