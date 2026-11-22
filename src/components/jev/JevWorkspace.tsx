@@ -62,6 +62,7 @@ import {
   computeViewportEnsureVisible,
   computeViewportFit,
   computeViewportKeepBoard,
+  unionRects,
   isShapeElement,
   makeSeed,
   Rect,
@@ -99,6 +100,7 @@ import {
   serializeCanvasStateForJev,
   type ContextSuggestion,
 } from "@/lib/jev/prediction-engine";
+import { arrowBounds } from "@/lib/jev/ghost-geometry";
 import { SelectionSuggestTrigger } from "@/lib/jev/selection-trigger";
 import { SettledAsk } from "@/lib/jev/settled-ask";
 import {
@@ -499,7 +501,10 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   // Ensure new diagrams, morphs, or ghosts stay cleanly inside HUD-safe viewport bounds
   const ensureElementsVisible = useCallback(
     (targetEls: JevElement[], margins?: ViewportMargins, opts: { keepBoard?: boolean } = {}) => {
-      const bounds = computeBounds(targetEls);
+      // An arrow between two nodes counts as what is drawn: its curve (it may bend round a node) and its label.
+      const byId = new Map([...elementsRef.current, ...targetEls].map((e) => [e.id, e]));
+      const links = targetEls.filter((e) => e.kind === "arrow" && byId.has(e.fromId ?? "") && byId.has(e.toId ?? ""));
+      const bounds = unionRects([computeBounds(targetEls.filter((e) => !links.includes(e))), ...links.map((a) => arrowBounds(a, byId))]);
       if (!bounds || typeof window === "undefined") return;
       // A phone has no room for desktop gutters, and its dock (one chip row and the bar) is short.
       const phone = opts.keepBoard && window.innerWidth < 640;
@@ -1500,8 +1505,10 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         ? nextElsSnapshot.find((e) => e.id === pred.focusId)
         : undefined;
       const placed = pred.addElements.filter((e) => e.kind !== "arrow");
-      if (placed.length > 0) {
-        ensureElementsVisible(placed, { top: 104, right: 64, bottom: 255, left: 64 }, { keepBoard: true });
+      // What was just added comes into view: the new nodes, or an accepted connection with its label.
+      const added = placed.length > 0 ? placed : pred.addElements;
+      if (added.length > 0) {
+        ensureElementsVisible(added, { top: 104, right: 64, bottom: 255, left: 64 }, { keepBoard: true });
       }
       if (!nextFocus) {
         setPredictions([]);

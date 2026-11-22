@@ -434,6 +434,19 @@ describe("connections are offered after the node exists, never applied", () => {
     expect(beside[0].addElements[0].label).not.toBe("");
   });
 
+  // Caren on prod, 22 Nov: with Worker and Object Storage on the board the offer was "Object Storage → Worker,
+  // publishes to". A worker writes to storage; storage does not publish to a worker.
+  it("offers Worker → Object Storage (writes to), never Object Storage → Worker", () => {
+    const worker = el({ id: "w", label: "Worker", x: 400, y: 100 });
+    const storage = el({ id: "s", label: "Object Storage", kind: "blob", x: 400, y: 300 });
+    // Whichever of the two was added last, the offer reads the same.
+    for (const nodeId of ["s", "w"]) {
+      const [option] = connectionOptions({ elements: [worker, storage], nodeId });
+      expect(option.title).toBe("Worker → Object Storage");
+      expect(option.addElements[0].label).toBe("writes to");
+    }
+  });
+
   it("gives the same order every time", () => {
     const node = fresh("Redis", "cache", 700, 500);
     const titles = () => connectionOptions({ elements: [...chain, node], nodeId: "new", anchorIds: ["pg"] }).map((o) => o.title);

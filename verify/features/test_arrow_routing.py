@@ -113,6 +113,25 @@ ALL_SHAFTS_JS = """() => {
 }"""
 
 
+# The label of an arrow as drawn on screen: left and right edge of its text, or null when it has none.
+LABEL_EDGES_JS = """(sel) => {
+  const g = document.querySelector(sel);
+  const t = g && [...g.querySelectorAll('text')].find((n) => n.textContent.trim());
+  if (!t) return null;
+  const r = t.getBoundingClientRect();
+  return {text: t.textContent.trim(), left: r.left, right: r.right, top: r.top, bottom: r.bottom};
+}"""
+
+
+def label_in_view(page, selector, what, width=390):
+    edges = page.evaluate(LABEL_EDGES_JS, selector)
+    if edges:
+        assert edges["left"] >= 0 and edges["right"] <= width, \
+            "%s: the label %r is cut off by the edge of the screen (%d to %d of %d px)" % (
+                what, edges["text"], edges["left"], edges["right"], width)
+    return edges
+
+
 def arrows_through_nodes(page, skot):
     """Every arrow on screen, drawn or ghost, that passes through a board node it does not connect."""
     els = skot.elements()
@@ -147,7 +166,7 @@ def test_arrows_route_stack(browser, server, base_url, evidence):
         skot.new_board()
         bar_of(page).tap()
         names = ["app", "api gateway", "auth service", "redis", "postgres", "kafka", "worker", "object storage"]
-        seen, skipping = [], 0
+        seen, skipping, labelled = [], 0, 0
         for i, name in enumerate(names, 1):
             page.keyboard.type(name, delay=20)
             page.keyboard.press("Enter")
@@ -159,6 +178,8 @@ def test_arrows_route_stack(browser, server, base_url, evidence):
             if shafts["ghost"]:
                 shot(page, evidence, "arrows-route-stack", "%d-%s-suggested" % (i, name.replace(" ", "-")))
             assert not found, "after %r an arrow runs through a node: %s" % (name, found)
+            if shafts["ghost"]:
+                labelled += 1 if label_in_view(page, "[role=application] svg [data-ghost-arrow]", "suggested after %r" % name) else 0
             # Accept the offered connection (the highlighted first chip) and look at it drawn.
             chip = page.locator(SUGGESTIONS + ' button[aria-pressed="true"]')
             if chip.count() and shafts["ghost"]:
@@ -174,10 +195,12 @@ def test_arrows_route_stack(browser, server, base_url, evidence):
                 skipping += 1 if [e for e in els if is_shape(e) and ys[0] < e["y"] < ys[1]] else 0
                 found = arrows_through_nodes(page, skot)
                 assert not found, "after accepting %r an arrow runs through a node: %s" % (label, found)
+                label_in_view(page, '[role=application] svg [data-element-id="%s"]' % new["id"], "accepted %r" % label)
                 assert frozen(els) == before, "accepting a connection moved a node"
         shot(page, evidence, "arrows-route-stack", "9-all-accepted")
         evidence.note(accepted=seen, arrows=arrows_named(skot.elements()), arrows_past_a_node=skipping)
         assert skipping >= 1, "the scenario must include an arrow that skips a node in the stack: %s" % seen
+        assert labelled >= 3, "the scenario must include suggested arrows with a label: %d" % labelled
         console = [e for e in evidence.errors() if "/api/jev/decide" not in e["text"] and "500" not in e["text"]]
         assert not console, console[:4]
     finally:

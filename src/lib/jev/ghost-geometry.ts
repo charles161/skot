@@ -37,6 +37,23 @@ export function labelRect(arrow: JevElement, byId: Map<string, JevElement>): Rec
   return { x: x - w / 2, y: y - LABEL_H / 2, width: w, height: LABEL_H };
 }
 
+/** Everything an arrow covers as drawn: its curve and its label. */
+export function arrowBounds(arrow: JevElement, byId: Map<string, JevElement>): Rect {
+  const pts = curvePoints(arrow, byId);
+  let minX = Math.min(...pts.map((p) => p.x));
+  let maxX = Math.max(...pts.map((p) => p.x));
+  let minY = Math.min(...pts.map((p) => p.y));
+  let maxY = Math.max(...pts.map((p) => p.y));
+  const label = labelRect(arrow, byId);
+  if (label) {
+    minX = Math.min(minX, label.x);
+    maxX = Math.max(maxX, label.x + label.width);
+    minY = Math.min(minY, label.y);
+    maxY = Math.max(maxY, label.y + label.height);
+  }
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
 export function rectsIntersect(a: Rect, b: Rect, pad = 0): boolean {
   return !(a.x + a.width + pad <= b.x || b.x + b.width + pad <= a.x || a.y + a.height + pad <= b.y || b.y + b.height + pad <= a.y);
 }

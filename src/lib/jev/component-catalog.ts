@@ -123,11 +123,11 @@ export const NEXT_ROLES: Record<Role, Role[]> = {
   client: ["edge"],
   edge: ["service"],
   service: ["store", "cache", "queue", "external"],
-  worker: ["store", "external"],
+  worker: ["store", "storage", "external"],
   queue: ["worker"],
   cache: ["store"],
   store: ["store", "cache", "storage"],
-  storage: ["worker"],
+  storage: [],
   external: ["queue"],
 };
 

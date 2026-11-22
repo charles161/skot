@@ -374,6 +374,20 @@ export function pointOnEdgeHandle(
   return null;
 }
 
+/** The smallest rectangle around all the given ones; null when there are none. */
+export function unionRects(rects: Array<Rect | null>): Rect | null {
+  const real = rects.filter((r): r is Rect => r !== null);
+  if (real.length === 0) return null;
+  const x = Math.min(...real.map((r) => r.x));
+  const y = Math.min(...real.map((r) => r.y));
+  return {
+    x,
+    y,
+    width: Math.max(...real.map((r) => r.x + r.width)) - x,
+    height: Math.max(...real.map((r) => r.y + r.height)) - y,
+  };
+}
+
 export function computeBounds(elements: JevElement[]): Rect | null {
   if (elements.length === 0) return null;
   let minX = Infinity;

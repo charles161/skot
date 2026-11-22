@@ -1,8 +1,15 @@
 // Charles, 22 Nov 2026 (2A): "route arrows around nodes (suggested and drawn). Never move nodes to do it."
 // Every judge in rounds 1 and 2 saw an arrow drawn straight through the node between its two ends.
 import { describe, expect, it } from "vitest";
-import { ARROW_CLEARANCE, getBoundaryPoint, getElementCenter, pointToArrowDistance, resolveArrowEndpoints } from "./geometry";
-import { arrowHitsShape, curvePoints } from "./ghost-geometry";
+import {
+  ARROW_CLEARANCE,
+  getBoundaryPoint,
+  getElementCenter,
+  pointToArrowDistance,
+  resolveArrowEndpoints,
+  unionRects,
+} from "./geometry";
+import { arrowBounds, arrowHitsShape, curvePoints, labelRect } from "./ghost-geometry";
 import type { JevElement, ShapeKind } from "./types";
 
 const T = 1_700_000_000_000;
@@ -183,6 +190,22 @@ describe("an arrow goes around the nodes between its ends", () => {
     // A node boxed in on every side can leave no single bend that clears everything: those few stay as they were.
     expect(routed).toBeGreaterThan(60);
     expect(blocked).toBeLessThanOrEqual(routed / 10);
+  });
+});
+
+// Caren on prod, 22 Nov: on a 390 px phone the label of an arrow that bends round a stack ("publishes to") was
+// cut off by the right edge. The view now pans to what the arrow covers as drawn, label included.
+describe("what an arrow covers as drawn", () => {
+  it("is its bent curve and its label, not just the straight line between its ends", () => {
+    const stack = [box("a", 214, 0), box("b", 214, 106), box("c", 214, 212), box("d", 214, 318)];
+    const arrow = link("a", "d", { label: "publishes to" });
+    const map = byId([...stack, arrow]);
+    const covers = arrowBounds(arrow, map);
+    const label = labelRect(arrow, map)!;
+    expect(covers.x + covers.width).toBeGreaterThanOrEqual(label.x + label.width);
+    expect(covers.x + covers.width).toBeGreaterThan(214 + 172 + 40);
+    expect(unionRects([covers, null, stack[0]])!.x).toBeLessThanOrEqual(214);
+    expect(unionRects([null])).toBeNull();
   });
 });
 
