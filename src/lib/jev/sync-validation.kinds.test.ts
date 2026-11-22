@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   jevElementSchema,
   parseRawDataChannelMessage,
-  parseRecoveryBuffer,
   parseStoredBoardSnapshot,
 } from "@/lib/jev/sync-validation";
+import { loadRecoverySnapshots } from "@/lib/jev/recovery-buffer";
 import { elementsContentEqual } from "@/lib/jev/board-sync";
 import { ARROW_ENDS, ELEMENT_KINDS, SHAPE_KINDS, type JevElement } from "@/lib/jev/types";
 
@@ -88,7 +88,8 @@ describe("sync-validation: every element kind and arrow end round-trips", () => 
         snapshot: { elements, boardTitle: "Kinds" },
       },
     ];
-    expect(parseRecoveryBuffer(JSON.stringify(buffer))[0]?.snapshot.elements).toEqual(elements);
+    const storage = { getItem: () => JSON.stringify(buffer), setItem: () => {}, removeItem: () => {} };
+    expect(loadRecoverySnapshots(storage, "room")[0]?.snapshot.elements).toEqual(elements);
   });
 
   it("rejects an unknown kind on every path", () => {

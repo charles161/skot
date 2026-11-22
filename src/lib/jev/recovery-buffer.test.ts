@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { JevElement } from "@/lib/jev/types";
 import {
-  clearRecoverySnapshots,
   loadRecoverySnapshots,
   MAX_RECOVERY_SNAPSHOTS,
   popRecoverySnapshot,
@@ -113,9 +112,6 @@ describe("JW-10 / JW-13: bounded 8-snapshot local recovery ring buffer with Zod 
     expect(loadRecoverySnapshots(storage, "room_B").map((e) => e.id)).toEqual([
       "rec_other_room",
     ]);
-
-    clearRecoverySnapshots(storage, "room_A");
-    expect(loadRecoverySnapshots(storage, "room_A")).toEqual([]);
   });
 
   it("validates snapshots strictly via Zod on read and rejects corrupted, invalid-tone, or prototype-polluting entries", () => {

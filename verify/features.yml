@@ -471,6 +471,22 @@ features:
       - src/components/jev/UnreadableBoard.tsx
       - src/lib/jev/saved-board.ts
 
+  - id: restore-earlier-copy
+    title: "Board menu > Restore earlier copy lists the saved copies and restores one in one undo step, by keyboard and
+      on a phone; neither looking nor restoring pushes a copy out of the 8"
+    check: restore-earlier-copy
+    sources:
+      - src/components/jev/BoardFileMenu.tsx
+      - src/components/jev/RestoreCopyDialog.tsx
+      - src/components/jev/JevWorkspace.tsx
+      - src/lib/jev/recovery-buffer.ts
+
+  - id: restore-copy-tolerant
+    title: "A saved copy over 500 elements restores whole; an unreadable one can be downloaded and is never deleted"
+    check: restore-copy-tolerant
+    sources:
+      - src/lib/jev/recovery-buffer.ts
+
 internal:
   - path: src/app/api/health/route.ts
     reason: Ops health probe; the gate uses it to wait for `next start`, nobody sees it.

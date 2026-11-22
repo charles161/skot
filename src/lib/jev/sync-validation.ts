@@ -19,7 +19,6 @@ export const MAX_TOMBSTONES = 500;
 export const MAX_WIRE_MESSAGE_BYTES = 512 * 1024;
 export const MAX_STORAGE_BYTES = 1024 * 1024;
 export const MAX_RECOVERY_SNAPSHOTS = 8;
-export const MAX_RECOVERY_STORAGE_BYTES = MAX_STORAGE_BYTES * MAX_RECOVERY_SNAPSHOTS;
 
 const COORD_LIMIT = 100_000;
 const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{3,8}$/;
@@ -442,15 +441,11 @@ export const boardRecoveryEntrySchema = z.object({
     "periodic",
     "manual",
   ]),
-  removedCount: z.number().int().min(0).max(MAX_BOARD_ELEMENTS),
-  editedCount: z.number().int().min(0).max(MAX_BOARD_ELEMENTS).optional(),
-  previousElementCount: z.number().int().min(0).max(MAX_BOARD_ELEMENTS),
+  removedCount: z.number().int().min(0),
+  editedCount: z.number().int().min(0).optional(),
+  previousElementCount: z.number().int().min(0),
   snapshot: storedBoardSnapshotSchema,
 });
-
-export const boardRecoveryBufferSchema = z
-  .array(boardRecoveryEntrySchema)
-  .max(MAX_RECOVERY_SNAPSHOTS);
 
 export type BoardRecoveryEntry = z.infer<typeof boardRecoveryEntrySchema>;
 
@@ -542,25 +537,4 @@ export function parseManualSdpPayload(raw: unknown): ValidatedManualSdp | null {
   if (!raw || typeof raw !== "object" || hasForbiddenOwnKeys(raw)) return null;
   const parsed = manualSdpSchema.safeParse(raw);
   return parsed.success ? parsed.data : null;
-}
-
-export function parseRecoveryBuffer(rawJson: string): BoardRecoveryEntry[] {
-  if (
-    typeof rawJson !== "string" ||
-    rawJson.length === 0 ||
-    utf8ByteLength(rawJson) > MAX_RECOVERY_STORAGE_BYTES
-  ) {
-    return [];
-  }
-  let decoded: unknown;
-  try {
-    decoded = JSON.parse(rawJson);
-  } catch {
-    return [];
-  }
-  if (!Array.isArray(decoded) || hasForbiddenOwnKeys(decoded)) {
-    return [];
-  }
-  const parsed = boardRecoveryBufferSchema.safeParse(decoded);
-  return parsed.success ? parsed.data : [];
 }

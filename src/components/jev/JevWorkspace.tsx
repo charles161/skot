@@ -147,6 +147,8 @@ import {
 import {
   popRecoverySnapshot,
   pushRecoverySnapshot,
+  sameBoard,
+  saveBeforeRestore,
   type BoardRecoveryEntry,
 } from "@/lib/jev/recovery-buffer";
 import {
@@ -165,10 +167,12 @@ import { JevP2PCollab } from "@/lib/jev/webrtc-collab";
 import {
   BoardFileMenuItems,
   BoardNoticeToast,
+  RestoreCopyMenuItem,
   useBoardFileActions,
   useBoardNotice,
   useImportFragment,
 } from "./BoardFileMenu";
+import { RestoreCopyDialog } from "./RestoreCopyDialog";
 import { FirstRunEmptyState } from "./FirstRunEmptyState";
 import { StarterBoardsMenuItems } from "./StarterBoardsPicker";
 import { findStarterBoard } from "@/lib/jev/starter-boards";
@@ -318,7 +322,30 @@ const NOT_SAVED: Record<Exclude<SaveOutcome, "saved">, string> = {
 };
 
 function getBrowserStorage() {
-  return typeof window !== "undefined" ? window.localStorage : null;
+  try {
+    return typeof window !== "undefined" ? window.localStorage : null;
+  } catch {
+    return null; // reading window.localStorage throws when the browser blocks it
+  }
+}
+
+const RESTORE_NOT_KEPT = {
+  tone: "error",
+  text: "Not restored: this browser couldn't keep a copy of the board you have now. Use Save board (.json) first.",
+} as const;
+
+/** Enter on a focused menu button opens that menu. */
+function isOnMenuButton(e: KeyboardEvent): boolean {
+  return Boolean((e.target as Element | null)?.closest?.('[data-slot="dropdown-menu-trigger"]'));
+}
+
+/** An open menu or dialog has its own keys: Enter there must not take a suggestion, nor Tab cycle them. */
+function keyBelongsToOverlay(e: KeyboardEvent): boolean {
+  const overlay = (e.target as Element | null)?.closest?.(
+    '[data-slot="dialog-content"], [data-slot="dropdown-menu-content"]'
+  );
+  // One that is closing has only the key that closed it.
+  return Boolean(overlay && (overlay.hasAttribute("data-open") || e.defaultPrevented));
 }
 
 interface JevWorkspaceProps {
@@ -748,6 +775,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     []
   );
 
+  const [restoreCopyOpen, setRestoreCopyOpen] = useState(false);
   const boardNotice = useBoardNotice();
   const showBoardNotice = boardNotice.show;
   const dismissBoardNotice = boardNotice.dismiss;
@@ -2157,6 +2185,14 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     },
   });
 
+  const applySteppedTitle = useCallback((title: string | undefined, peerId: string) => {
+    if (title === undefined) return;
+    boardTitleRef.current = title;
+    titleRevRef.current += 1;
+    titleUpdatedByRef.current = peerId;
+    setBoardTitle(title);
+  }, []);
+
   const handleUndo = useCallback(() => {
     const history = getHistory();
     const prev = elementsRef.current;
@@ -2178,6 +2214,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       }
     );
     history.replaceWithoutHistory(stamped.elements);
+    applySteppedTitle(history.steppedTitle, peerId);
     elementsRef.current = stamped.elements;
     tombstonesRef.current = stamped.tombstones;
     tombstoneHorizonRevRef.current = stamped.tombstoneHorizonRev;
@@ -2212,7 +2249,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       baseTimestamp: baseTimestampRef.current,
       hasLocalEdits: true,
     });
-  }, [getHistory]);
+  }, [getHistory, applySteppedTitle]);
 
   const handleRedo = useCallback(() => {
     const history = getHistory();
@@ -2235,6 +2272,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       }
     );
     history.replaceWithoutHistory(stamped.elements);
+    applySteppedTitle(history.steppedTitle, peerId);
     elementsRef.current = stamped.elements;
     tombstonesRef.current = stamped.tombstones;
     tombstoneHorizonRevRef.current = stamped.tombstoneHorizonRev;
@@ -2269,7 +2307,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       baseTimestamp: baseTimestampRef.current,
       hasLocalEdits: true,
     });
-  }, [getHistory]);
+  }, [getHistory, applySteppedTitle]);
 
   const applyRestoredSnapshot = useCallback(
     (snapshot: StoredBoardSnapshot, forceBumpRevs = false) => {
@@ -2310,7 +2348,13 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       }
 
       const history = getHistory();
-      history.commitLocal(restoredElements, { recordUndo: true });
+      history.commitLocal(restoredElements, {
+        recordUndo: true,
+        title:
+          restoredTitle !== boardTitleRef.current
+            ? { before: boardTitleRef.current, after: restoredTitle }
+            : undefined,
+      });
       elementsRef.current = restoredElements;
       boardTitleRef.current = restoredTitle;
       tombstonesRef.current = stamped.tombstones;
@@ -2365,6 +2409,27 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     applyRestoredSnapshot(entry.snapshot, false);
     announceStatus("Restored previous board snapshot");
   }, [applyRestoredSnapshot, recoveryToast, roomId, announceStatus]);
+
+  const restoreCopy = (snapshot: StoredBoardSnapshot) => {
+    setRestoreCopyOpen(false);
+    const current = { elements: elementsRef.current, boardTitle: boardTitleRef.current, hasLocalEdits: true };
+    if (sameBoard(current, snapshot)) {
+      showBoardNotice({ tone: "info", text: "The board already matches that copy" });
+      return;
+    }
+    if (!saveBeforeRestore(getBrowserStorage(), roomId, current, Date.now())) {
+      showBoardNotice(RESTORE_NOT_KEPT);
+      return;
+    }
+    applyRestoredSnapshot(snapshot);
+    setJoiningSharedRoom(false);
+    lastTouchedIdRef.current = null;
+    setPredictions([]);
+    setIntent(null);
+    fitToView(snapshot.elements);
+    const kept = current.elements.length > 0 ? " The board you had is kept in the same list." : "";
+    showBoardNotice({ tone: "info", text: `Earlier copy restored.${kept}` });
+  };
 
   const handleKeepPeerChanges = useCallback(
     (peerId: string) => {
@@ -2566,7 +2631,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       // picks a tool (or Fork It); with a name half typed those keys belong to the keyboard.
       const fromEmptyBar = target === thoughtInputRef.current && thoughtInputRef.current?.value === "" && altLetter(e) !== null;
 
-      if (inInput && !fromEmptyBar) return;
+      if ((inInput && !fromEmptyBar) || keyBelongsToOverlay(e)) return;
 
       // "/" focuses the Thought Bar
       if (e.key === "/" && !aiQuiet) {
@@ -2688,7 +2753,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
           applyPrediction(activePredIdx);
           return;
         }
-        if (selectedIds.length === 1) {
+        if (selectedIds.length === 1 && !isOnMenuButton(e)) {
           e.preventDefault();
           startInlineEditRef.current?.(selectedIds[0]);
           return;
@@ -3184,6 +3249,11 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-56 rounded-xl">
               <BoardFileMenuItems actions={boardFile} />
+              <RestoreCopyMenuItem
+                getStorage={getBrowserStorage}
+                roomId={roomId}
+                onOpen={() => setRestoreCopyOpen(true)}
+              />
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={exportSvg} className="gap-2 text-xs">
                 <IconDownload className="h-3.5 w-3.5" aria-hidden="true" />
@@ -3801,6 +3871,14 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
           if (!collabRef.current) throw new Error("Session not ready");
           await collabRef.current.completeManualAnswer(code);
         }}
+      />
+
+      <RestoreCopyDialog
+        open={restoreCopyOpen}
+        onOpenChange={setRestoreCopyOpen}
+        getStorage={getBrowserStorage}
+        roomId={roomId}
+        onRestore={restoreCopy}
       />
 
       <PracticePicker

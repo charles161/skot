@@ -3,16 +3,17 @@
 import { IconDownload, IconWarning } from "@/brand/icons";
 import { Button } from "@/components/ui/button";
 
+export function downloadSavedCopy(raw: string) {
+  const url = URL.createObjectURL(new Blob([raw], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "skot-board-saved-copy.json";
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 /** Shown in place of a board whose saved copy can't be read. Nothing here writes or deletes it. */
 export function UnreadableBoard({ raw }: { raw: string }) {
-  const download = () => {
-    const url = URL.createObjectURL(new Blob([raw], { type: "application/json" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "skot-board-saved-copy.json";
-    link.click();
-    URL.revokeObjectURL(url);
-  };
   return (
     <main className="flex min-h-dvh w-full items-center justify-center bg-background p-6 text-foreground">
       <div role="alert" className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-sm">
@@ -25,7 +26,7 @@ export function UnreadableBoard({ raw }: { raw: string }) {
           If you start a new board, this one stays at this address: press Back to return to it.
         </p>
         <div className="mt-5 flex flex-wrap gap-2.5">
-          <Button type="button" onClick={download}>
+          <Button type="button" onClick={() => downloadSavedCopy(raw)}>
             <IconDownload className="h-4 w-4" aria-hidden="true" />
             Download saved copy
           </Button>

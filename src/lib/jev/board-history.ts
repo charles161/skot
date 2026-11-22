@@ -11,6 +11,13 @@ export interface CommitLocalOptions {
    * the stale pre-drag undo snapshot is dropped so Undo never wipes a peer's change.
    */
   expectedRemoteSyncGeneration?: number;
+  /** For a step that also renames the board, so one undo takes both back. */
+  title?: { before: string; after: string };
+}
+
+interface HistoryStep {
+  elements: JevElement[];
+  title?: CommitLocalOptions["title"];
 }
 
 export type CanvasDragMode =
@@ -53,8 +60,9 @@ export function resolvePointerCancelDecision(params: {
 export class BoardHistoryController {
   private _current: JevElement[];
   private _remoteSyncGeneration = 0;
-  private undoStack: JevElement[][] = [];
-  private redoStack: JevElement[][] = [];
+  private undoStack: HistoryStep[] = [];
+  private redoStack: HistoryStep[] = [];
+  private _steppedTitle: string | undefined;
 
   constructor(initialElements: JevElement[]) {
     this._current = initialElements;
@@ -66,6 +74,11 @@ export class BoardHistoryController {
 
   get remoteSyncGeneration(): number {
     return this._remoteSyncGeneration;
+  }
+
+  /** The title the last undo or redo moved to, if that step changed it. */
+  get steppedTitle(): string | undefined {
+    return this._steppedTitle;
   }
 
   get undoCount(): number {
@@ -94,7 +107,7 @@ export class BoardHistoryController {
       const snapshot = opts?.undoSnapshot ?? this._current;
       this.undoStack = [
         ...this.undoStack.slice(-(MAX_HISTORY_ENTRIES - 1)),
-        snapshot,
+        { elements: snapshot, title: opts?.title },
       ];
       this.redoStack = [];
     }
@@ -119,10 +132,11 @@ export class BoardHistoryController {
     this.undoStack = this.undoStack.slice(0, -1);
     this.redoStack = [
       ...this.redoStack.slice(-(MAX_HISTORY_ENTRIES - 1)),
-      this._current,
+      { elements: this._current, title: previous.title },
     ];
-    this._current = previous;
-    return previous;
+    this._current = previous.elements;
+    this._steppedTitle = previous.title?.before;
+    return previous.elements;
   }
 
   redo(): JevElement[] | null {
@@ -131,10 +145,11 @@ export class BoardHistoryController {
     this.redoStack = this.redoStack.slice(0, -1);
     this.undoStack = [
       ...this.undoStack.slice(-(MAX_HISTORY_ENTRIES - 1)),
-      this._current,
+      { elements: this._current, title: next.title },
     ];
-    this._current = next;
-    return next;
+    this._current = next.elements;
+    this._steppedTitle = next.title?.after;
+    return next.elements;
   }
 }
 

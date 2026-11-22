@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { IconClose, IconCopy, IconDownload, IconUpload, IconWarning, IconCheck } from "@/brand/icons";
+import { IconClose, IconCopy, IconDownload, IconReset, IconUpload, IconWarning, IconCheck } from "@/brand/icons";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import {
   IMPORT_HASH_PREFIX,
@@ -13,6 +13,7 @@ import {
   parseBoardFile,
   stageImportedBoard,
 } from "@/lib/jev/board-import";
+import { hasSavedCopies, type StorageLike } from "@/lib/jev/recovery-buffer";
 import { formatRoomHash } from "@/lib/jev/room-auth";
 import type { StoredBoardSnapshot } from "@/lib/jev/sync-validation";
 import { sanitizeExportFilename } from "@/lib/jev/svg-export";
@@ -158,6 +159,28 @@ export function BoardFileMenuItems({ actions }: { actions: ReturnType<typeof use
         Copy share link
       </DropdownMenuItem>
     </>
+  );
+}
+
+/** Mounted with the menu, so it looks afresh each time the menu opens. */
+export function RestoreCopyMenuItem({
+  getStorage,
+  roomId,
+  onOpen,
+}: {
+  getStorage: () => StorageLike | null;
+  roomId: string;
+  onOpen: () => void;
+}) {
+  const [hasCopies] = useState(() => hasSavedCopies(getStorage(), roomId));
+  return (
+    <DropdownMenuItem disabled={!hasCopies} onClick={onOpen} className="gap-2 text-xs">
+      <IconReset className="h-3.5 w-3.5" aria-hidden="true" />
+      <span className="flex flex-col">
+        Restore earlier copy
+        {!hasCopies && <span className="text-[10px]">No earlier copy saved</span>}
+      </span>
+    </DropdownMenuItem>
   );
 }
 
