@@ -26,9 +26,11 @@ interface Limits {
 const limitsOf = (field: z.ZodType) => z.toJSONSchema(field, { io: "input" }) as Limits;
 const maxOf = (field: z.ZodType) => limitsOf(field).maxLength!;
 
-function answer(content: unknown) {
+const answer = (content: unknown) => answerText(JSON.stringify(content));
+
+function answerText(content: string) {
   const fetchSpy = vi.fn().mockResolvedValue(
-    new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) } }] }), { status: 200 })
+    new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 })
   );
   vi.stubGlobal("fetch", fetchSpy);
   return fetchSpy;
@@ -201,4 +203,40 @@ describe("Fork answers with over-long text", () => {
       expect(validateForkTakesPayload(payload(edit), { constraint: CONSTRAINT }).ok).toBe(false);
     });
   }
+});
+
+// Real Haiku answers to a six-node checkout board, 22 Nov 2026: each was thrown away over a slip like these.
+describe("Fork answers with harmless slips", () => {
+  it("drops an unknown tone (Haiku writes \"ocher\") and keeps the node", async () => {
+    answer(payload((t) => Object.assign(t.graph.nodes[0], { tone: "ocher" })));
+    const node = (await fork(CONSTRAINT))?.takes[1].graph.nodes[0];
+    expect(node?.label).toBe("API");
+    expect(node?.tone).toBeUndefined();
+  });
+
+  it("keeps a valid tone", async () => {
+    answer(payload((t) => Object.assign(t.graph.nodes[0], { tone: "ochre" })));
+    expect((await fork(CONSTRAINT))?.takes[1].graph.nodes[0].tone).toBe("ochre");
+  });
+
+  it("ignores a stray key in a cost line", async () => {
+    answer(payload((t) => Object.assign(t.costs[3], { archetype: "multi_az_lb" })));
+    expect((await fork(CONSTRAINT))?.takes[1].tradeoffs?.costs[3]).toEqual(validTake().costs[3]);
+  });
+
+  for (const [name, wrap] of [
+    ["a code fence that never closes", (json: string) => `\`\`\`json\n${json}`],
+    ["a closed code fence", (json: string) => `\`\`\`json\n${json}\n\`\`\``],
+    ["a sentence before the JSON", (json: string) => `Here are the takes:\n${json}`],
+  ] as const) {
+    it(`reads an answer with ${name}`, async () => {
+      answerText(wrap(JSON.stringify(payload())));
+      expect((await fork(CONSTRAINT))?.takes).toHaveLength(3);
+    });
+  }
+
+  it("still rejects takes without their own graph", async () => {
+    answer(payload((t) => Reflect.deleteProperty(t, "graph")));
+    expect(await fork(CONSTRAINT)).toBeNull();
+  });
 });

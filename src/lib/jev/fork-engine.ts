@@ -1538,19 +1538,24 @@ function shorten(text: string, max: number): string {
   return `${kept.replace(/[\s,;:]+$/, "")}…`;
 }
 
-/** Shortens display text to the maximum `schema` reports for it; every other violation is left to the validator. */
-function shortenOverlongText(schema: z.ZodType, raw: unknown): unknown {
+/**
+ * Repairs what is only cosmetic: display text over the maximum `schema` reports is shortened, an unknown tone is
+ * dropped. Every other violation is left to the validator.
+ */
+function repairCosmeticFields(schema: z.ZodType, raw: unknown): unknown {
   const parsed = schema.safeParse(raw);
   if (parsed.success) return raw;
   const copy = structuredClone(raw);
   for (const issue of parsed.error.issues) {
-    if (issue.code !== "too_big" || issue.origin !== "string") continue;
     const key = issue.path[issue.path.length - 1];
-    if (!DISPLAY_TEXT_KEYS.has(key)) continue;
+    const tooLong = issue.code === "too_big" && issue.origin === "string" && DISPLAY_TEXT_KEYS.has(key);
+    const unknownTone = issue.code === "invalid_value" && key === "tone";
+    if (!tooLong && !unknownTone) continue;
     const parent = issue.path
       .slice(0, -1)
       .reduce<unknown>((node, step) => (node as Record<PropertyKey, unknown>)[step], copy) as Record<PropertyKey, string>;
-    parent[key] = shorten(parent[key].trim(), Number(issue.maximum));
+    if (issue.code === "too_big") parent[key] = shorten(parent[key].trim(), Number(issue.maximum));
+    else delete parent[key];
   }
   return copy;
 }
@@ -1577,7 +1582,7 @@ function flattenValidatedTradeoffs(raw: object): unknown {
 /**
  * Validates model-generated takes. With a stated constraint every take must also carry
  * `buys`, one cost line per axis and a `failureMode`; they land on `take.tradeoffs`.
- * Over-long display text is shortened: it is no reason to discard three otherwise valid takes.
+ * Cosmetic slips are repaired: they are no reason to discard three otherwise valid takes.
  */
 export function validateForkTakesPayload(
   raw: unknown,
@@ -1589,7 +1594,7 @@ export function validateForkTakesPayload(
   const pressure = opts.constraint?.pressure;
   const flat = flattenValidatedTradeoffs(raw);
   const payloadSchema = pressure ? rawConstrainedForkTakesPayloadSchema : rawForkTakesPayloadSchema;
-  const parsed = payloadSchema.safeParse(shortenOverlongText(payloadSchema, flat));
+  const parsed = payloadSchema.safeParse(repairCosmeticFields(payloadSchema, flat));
   if (!parsed.success) {
     return {
       ok: false,
@@ -1601,7 +1606,7 @@ export function validateForkTakesPayload(
   for (const item of parsed.data.takes as Array<
     z.infer<typeof rawForkTakeSpecSchema> & Partial<z.infer<typeof rawConstrainedForkTakeSpecSchema>>
   >) {
-    const graphCheck = validateSemanticGraph(shortenOverlongText(semanticGraphSchema, item.graph));
+    const graphCheck = validateSemanticGraph(repairCosmeticFields(semanticGraphSchema, item.graph));
     if (!graphCheck.ok) {
       return { ok: false, error: `Invalid take graph: ${graphCheck.error}` };
     }

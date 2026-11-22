@@ -551,8 +551,9 @@ describe("llm-graph-client: per-route model selection", () => {
   });
 
   // Model eval 22 Nov 2026 (evals/models/RESULTS.md on branch model-eval): Haiku 5.5 wins context, practice review,
-  // moves and morph. Re-run on Fork once its prompt stated the schema's limits (20 calls each, Opus judge blind):
-  // Haiku 100% valid, judge 8.1, p95 9.0 s; gpt-4.1-mini 95%, 5.3, 11.5 s. next_options and generate keep gpt-4.1-mini.
+  // moves and morph. Fork on the prompt that states the schema's limits, 140 answers each through this validator:
+  // both models 136 valid (fresh answers only: Haiku 67/70, gpt-4.1-mini 68/70), judge 8.1 vs 5.3.
+  // next_options and generate keep gpt-4.1-mini.
   // Changing a route's model needs a re-run of that eval, then this pin.
   it("pins the model every gateway route uses", () => {
     expect(DEFAULT_AI_GATEWAY_MODEL).toBe("openai/gpt-4.1-mini");

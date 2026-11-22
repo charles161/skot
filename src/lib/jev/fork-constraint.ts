@@ -64,7 +64,7 @@ export const forkCostLineSchema = z
     text: z.string().trim().min(2).max(80),
     severity: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   })
-  .strict();
+  .strip();
 export type ForkCostLine = z.infer<typeof forkCostLineSchema>;
 
 /** Exactly one line per cost axis, in FORK_COST_AXES order. */

@@ -359,10 +359,9 @@ export async function generateForkTakesWithLlm(params: {
 
   let decoded: unknown;
   try {
-    const trimmed = result.content.trim();
-    const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    const body = fence ? fence[1].trim() : trimmed;
-    decoded = JSON.parse(body);
+    // Outermost braces, because Haiku sometimes opens a code fence and never closes it.
+    const { content } = result;
+    decoded = JSON.parse(content.slice(content.indexOf("{"), content.lastIndexOf("}") + 1));
   } catch {
     logServerEvent("warn", {
       route: "ai-gateway",
