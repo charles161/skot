@@ -446,11 +446,32 @@ export function computeViewportEnsureVisible(
 }
 
 /**
- * The whole board stays readable down to this zoom; past it the view follows the newest node instead. A phone
- * already opens at about 0.53 and is read closer, so it may go further before earlier nodes scroll away.
+ * Brings `target` into view without touching the zoom: the smallest pan that shows it, or centred when it is
+ * bigger than the view.
  */
+export function computeViewportPanTo(viewport: Viewport, target: Rect, opts: ViewportFitOptions): Viewport {
+  const screenW = Math.max(240, opts.screenWidth);
+  const screenH = Math.max(240, opts.screenHeight);
+  const { top, right, bottom, left } = resolveHudMargins(screenW, screenH, opts.margins);
+  const safeRight = screenW - right;
+  const safeBottom = screenH - bottom;
+  const z = viewport.zoom;
+  const pan = (start: number, size: number, lo: number, hi: number): number => {
+    const from = start;
+    const to = start + size;
+    if (size > hi - lo) return (lo + hi) / 2 - (from + to) / 2;
+    if (to > hi) return hi - to;
+    if (from < lo) return lo - from;
+    return 0;
+  };
+  const dx = pan(viewport.x + target.x * z, target.width * z, left, safeRight);
+  const dy = pan(viewport.y + target.y * z, target.height * z, top, safeBottom);
+  if (dx === 0 && dy === 0) return viewport;
+  return { x: Math.round(viewport.x + dx), y: Math.round(viewport.y + dy), zoom: z };
+}
+
+/** The whole board stays readable down to this zoom; past it the view follows the newest node instead. */
 export const WHOLE_BOARD_MIN_ZOOM = 0.5;
-export const WHOLE_BOARD_MIN_ZOOM_PHONE = 0.33;
 const PHONE_WIDTH = 640;
 
 /**
@@ -458,6 +479,8 @@ const PHONE_WIDTH = 640;
  * zooms out to show the whole board, as long as that stays readable (never zooming in, never under
  * `WHOLE_BOARD_MIN_ZOOM`), so earlier nodes do not scroll away as a diagram grows. Only a board too big
  * for that pans to the target.
+ *
+ * A phone never zooms out: the text keeps its size and the view pans to the target (Charles, 22 Nov 2026).
  */
 export function computeViewportKeepBoard(
   viewport: Viewport,
@@ -465,6 +488,7 @@ export function computeViewportKeepBoard(
   board: Rect | null,
   opts: ViewportFitOptions
 ): Viewport {
+  if (opts.screenWidth < PHONE_WIDTH) return computeViewportPanTo(viewport, target, opts);
   const toTarget = computeViewportEnsureVisible(viewport, target, opts);
   if (toTarget === viewport || !board) return toTarget;
   const x = Math.min(board.x, target.x);
@@ -476,6 +500,5 @@ export function computeViewportKeepBoard(
     height: Math.max(board.y + board.height, target.y + target.height) - y,
   };
   const whole = computeViewportFit(all, { ...opts, minZoom: 0.01, maxZoom: Math.min(opts.maxZoom ?? 1.1, viewport.zoom) });
-  const floor = opts.screenWidth < PHONE_WIDTH ? WHOLE_BOARD_MIN_ZOOM_PHONE : WHOLE_BOARD_MIN_ZOOM;
-  return whole.zoom >= floor ? whole : toTarget;
+  return whole.zoom >= WHOLE_BOARD_MIN_ZOOM ? whole : toTarget;
 }

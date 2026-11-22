@@ -3,6 +3,7 @@ import {
   computeBounds,
   computeViewportEnsureVisible,
   computeViewportKeepBoard,
+  computeViewportPanTo,
   computeViewportFit,
   distanceBetween,
   findFreeSpot,
@@ -461,16 +462,41 @@ describe("computeViewportKeepBoard: a growing diagram stays whole", () => {
     expect(onScreen(next, node(6400))).toBe(true);
   });
 
-  // Round-2 judge, prod phone: after accepting a suggestion the view followed the next ghost and App slid off screen.
-  it("on a phone keeps three columns in view by zooming out rather than scrolling the first away", () => {
-    const phone = { screenWidth: 390, screenHeight: 844, margins: { top: 100, right: 64, bottom: 255, left: 64 } };
-    const start = { x: 30, y: 150, zoom: 0.53 };
-    const board = { x: 60, y: 330, width: 472, height: 80 };
-    const ghost = { x: 660, y: 330, width: 172, height: 72 };
-    const next = computeViewportKeepBoard(start, ghost, board, phone);
-    expect(next.zoom).toBeLessThan(0.53);
-    expect(next.zoom).toBeGreaterThanOrEqual(0.33);
-    expect(next.x + board.x * next.zoom).toBeGreaterThanOrEqual(0);
-    expect(next.x + (ghost.x + ghost.width) * next.zoom).toBeLessThanOrEqual(390);
+  // Charles, 22 Nov (5A): "on a phone keep text readable and pan to the newest node, instead of zooming out to fit
+  // the whole board." Before: nine typed names took a phone from zoom 1 to 0.68.
+  describe("on a phone", () => {
+    const phone = { screenWidth: 390, screenHeight: 844, margins: { top: 104, right: 16, bottom: 150, left: 16 } };
+    const start = { x: 30, y: 150, zoom: 1 };
+    const inView = (v: { x: number; y: number; zoom: number }, r: { x: number; y: number; width: number; height: number }) =>
+      v.x + r.x * v.zoom >= 15 && v.x + (r.x + r.width) * v.zoom <= 390 - 15 && v.y + r.y * v.zoom >= 103 && v.y + (r.y + r.height) * v.zoom <= 844 - 149;
+
+    it("a new node off screen pans the view to it and leaves the zoom alone", () => {
+      const board = { x: 60, y: 100, width: 172, height: 900 };
+      const newest = { x: 60, y: 1100, width: 172, height: 72 };
+      const next = computeViewportKeepBoard(start, newest, board, phone);
+      expect(next.zoom).toBe(1);
+      expect(inView(next, newest)).toBe(true);
+    });
+
+    it("keeps whatever zoom the user chose, in or out", () => {
+      const newest = { x: 900, y: 1100, width: 172, height: 72 };
+      for (const zoom of [0.53, 0.8, 1.4]) {
+        const next = computeViewportKeepBoard({ x: 30, y: 150, zoom }, newest, { x: 0, y: 0, width: 600, height: 600 }, phone);
+        expect(next.zoom).toBe(zoom);
+        expect(inView(next, newest)).toBe(true);
+      }
+    });
+
+    it("does not move while the new node is already in view", () => {
+      const view = { x: 0, y: 0, zoom: 1 };
+      expect(computeViewportKeepBoard(view, { x: 60, y: 300, width: 172, height: 72 }, null, phone)).toBe(view);
+    });
+
+    it("a block bigger than the screen is centred, still at the same zoom", () => {
+      const block = { x: 0, y: 0, width: 900, height: 300 };
+      const next = computeViewportPanTo({ x: 0, y: 0, zoom: 1 }, block, phone);
+      expect(next.zoom).toBe(1);
+      expect(next.x + 450).toBe((16 + 390 - 16) / 2);
+    });
   });
 });

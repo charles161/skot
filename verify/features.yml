@@ -122,6 +122,14 @@ features:
     sources:
       - src/lib/jev/fork-engine.ts
 
+  - id: phone-pans
+    title: "5A: on a phone a growing board never zooms out; the zoom and the text size stay as they are and the view
+      pans to the node that was just added"
+    check: phone-pans
+    sources:
+      - src/lib/jev/geometry.ts
+      - src/components/jev/JevWorkspace.tsx
+
   - id: call-budget
     title: "Drawing does not drain the AI budget: nothing is asked while a shape, label or arrow is in progress; a
       settled add, arrow, click or drag costs one call; a 6-node, 5-arrow board drawn quickly costs at most 3, and

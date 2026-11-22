@@ -4,9 +4,12 @@
 5A  On a phone the text stays readable and the view pans to the newest node; it does not zoom out to fit the board.
 8A  When a Fork take renames the selected node, its arrows stay on that node (test_fork_rename.py).
 """
+import json
+import re
+
 from conftest import assert_no_console_errors, check
-from driver import is_shape
-from test_core_loop import ai, arrows_named, bar_of, board, by_creation, type_enter  # noqa: F401 (ai is a fixture)
+from driver import Driver, is_shape
+from test_core_loop import JEV, ai, arrows_named, bar_of, board, by_creation, type_enter  # noqa: F401 (ai is a fixture)
 from test_features import SUGGESTIONS, ghosts, read_options, shot
 
 KEY_LEGEND = SUGGESTIONS + " [data-key-legend]"
@@ -95,3 +98,59 @@ def test_enter_needs_pick(page, skot, evidence, ai):
         "Enter after a click added something: %s %s" % (labels(skot), arrows_named(els))
     evidence.note(nodes=labels(skot), arrows=arrows_named(els))
     assert_no_console_errors(evidence)
+
+
+PHONE = {"width": 390, "height": 844}
+DOCK_JS = """() => {
+  const bar = document.querySelector('input[aria-label="Describe a component or diagram flow to draw"]');
+  const region = document.querySelector('[role=region][aria-label="Predictive drafting suggestions"]');
+  const tops = [bar, region].filter(Boolean).map((n) => n.getBoundingClientRect().top);
+  return Math.min(...tops);
+}"""
+LABEL_HEIGHT_JS = """(id) => Math.max(0, ...[...document.querySelectorAll(
+  `[role=application] svg [data-element-id="${CSS.escape(id)}"] text, [role=application] svg [data-element-id="${CSS.escape(id)}"] foreignObject *`
+)].filter((n) => n.children.length === 0 && n.textContent.trim()).map((n) => n.getBoundingClientRect().height))"""
+
+
+@check("phone-pans")
+def test_phone_pans(browser, server, base_url, evidence):
+    """5A. On a phone a growing board does not zoom out: the text keeps its size and the view moves to the node
+    that was just added. Earlier nodes may scroll off; the user pans back to them."""
+    headers = {"CF-Connecting-IP": "198.18.240.9"} if server["launched"] else {}
+    ctx = browser.new_context(viewport=PHONE, is_mobile=True, has_touch=True, device_scale_factor=2, extra_http_headers=headers)
+    ctx.route(re.compile(r"/_vercel/(insights|speed-insights)/"), lambda r: r.fulfill(status=200, content_type="text/javascript", body=""))
+    page = ctx.new_page()
+    evidence.watch(page, "phone")
+    page.route("**/api/jev/decide", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps(
+        dict(JEV, nextActionProbabilities=None, contextSuggestions=[]))))
+    skot = Driver(page, base_url)
+    try:
+        skot.new_board()
+        bar_of(page).tap()
+        names = ["app", "api gateway", "postgres", "redis", "queue", "worker", "cdn", "search", "metrics"]
+        zooms, heights = [], []
+        for i, name in enumerate(names, 1):
+            page.keyboard.type(name, delay=20)
+            page.keyboard.press("Enter")
+            els = board(skot, i)
+            page.wait_for_timeout(700)
+            newest = by_creation(els)[-1]
+            v = skot.viewport()
+            zooms.append(round(v["zoom"], 3))
+            heights.append(round(page.evaluate(LABEL_HEIGHT_JS, newest["id"]), 1))
+            dock_top = page.evaluate(DOCK_JS)
+            x1, y1 = skot.to_screen(newest["x"], newest["y"], v)
+            x2, y2 = skot.to_screen(newest["x"] + newest["width"], newest["y"] + newest["height"], v)
+            if i in (1, 5, len(names)):
+                shot(page, evidence, "phone-pans", "%d-nodes" % i)
+            assert x1 >= 0 and x2 <= PHONE["width"] and y1 >= 48 and y2 <= dock_top, \
+                "node %d (%s) is not in view after it was added: %s, dock at %d" % (
+                    i, newest["label"], (round(x1), round(y1), round(x2), round(y2)), dock_top)
+        evidence.note(zooms=zooms, label_heights_px=heights, nodes=[e["label"] for e in by_creation(skot.elements())])
+        assert len(set(zooms)) == 1, "adding nodes on a phone must not change the zoom: %s" % zooms
+        assert zooms[0] >= 0.9, "a new board on a phone starts at a readable size: %s" % zooms[0]
+        assert min(heights) >= 14, "node names must stay readable (at least 14 px tall on screen): %s" % heights
+        assert_no_console_errors(evidence)
+    finally:
+        ctx.close()
+

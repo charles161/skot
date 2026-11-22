@@ -508,7 +508,8 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         screenHeight: window.innerHeight,
         margins: phone ? { ...margins, left: 16, right: 16, bottom: 150 } : margins,
       };
-      // keepBoard: a growing diagram zooms out to stay whole instead of scrolling its first nodes away.
+      // keepBoard: a growing diagram zooms out to stay whole instead of scrolling its first nodes away. A phone
+      // keeps its zoom and pans to the new node.
       const board = opts.keepBoard ? computeBounds(elementsRef.current) : null;
       setViewport((prev) =>
         opts.keepBoard ? computeViewportKeepBoard(prev, bounds, board, fit) : computeViewportEnsureVisible(prev, bounds, fit)
