@@ -1355,7 +1355,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
    * the usual next steps. The order is the board's; jev only marks its pick.
    */
   const presentAfterCreate = useCallback(
-    (nodeId: string, anchorIds: string[], els: JevElement[], userPicked = false) => {
+    (nodeId: string, anchorIds: string[], els: JevElement[], userPicked = false, offerEnter = true) => {
       lastTouchedIdRef.current = nodeId;
       if (aiQuietRef.current) return;
       const result = buildAfterCreateOptions({ elements: els, nodeId, anchorIds, userPicked, viewportCenter: viewportCenterRef.current });
@@ -1364,7 +1364,8 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         setIntent(null);
         return;
       }
-      presentNextOptions(result, els, { highlight: enterDefaultIndex(result.options, nodeId) });
+      // Enter takes the node's first offered connection, once. After that its other connections wait for Tab.
+      presentNextOptions(result, els, { highlight: offerEnter ? enterDefaultIndex(result.options, nodeId) : NO_OPTION });
     },
     [presentNextOptions]
   );
@@ -1511,9 +1512,10 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       // handles on the board always mean "the next node lands beside this".
       setInspectorOpen(false);
       selectionTriggerRef.current?.consume();
-      // An accepted link: offer what else the node could connect to before moving on to bigger steps.
+      // An accepted link: offer what else the node could connect to before moving on to bigger steps. Nothing
+      // is highlighted, so pressing Enter again does not wire the node to the rest of the board.
       const acceptedLink = pred.category === "connect" && !pred.tier && placed.length === 0;
-      if (acceptedLink) presentAfterCreate(nextFocus.id, [], nextElsSnapshot);
+      if (acceptedLink) presentAfterCreate(nextFocus.id, [], nextElsSnapshot, false, false);
       else presentSubjectOptions(nextFocus.id, nextElsSnapshot);
     },
     [updateElements, presentSubjectOptions, presentAfterCreate, pushEditDelta, ensureElementsVisible]

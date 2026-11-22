@@ -74,14 +74,34 @@ def test_enter_needs_pick(page, skot, evidence, ai):
     new = [a for a in arrows_named(els) if a not in before]
     assert "Postgres" in new[0], "Enter accepts a connection of the node just added: %s" % new
     shot(page, evidence, "enter-needs-pick", "3-connection-accepted")
-    # More Enters accept further connections of Postgres at most; they never add a node.
+    # One Enter, one connection. The node's other possible connections are offered, not highlighted: more
+    # Enters add nothing (prod walk, 22 Nov: four Enters wired Metrics to four more nodes).
+    page.wait_for_timeout(500)
+    assert not highlighted(page), "after the connection is accepted nothing is highlighted: %s" % highlighted(page)
     for _ in range(3):
         page.keyboard.press("Enter")
         page.wait_for_timeout(400)
     els = skot.elements()
     assert len([e for e in els if is_shape(e)]) == 3, "Enter after the connection added nodes: %s" % labels(skot)
-    extra = [a for a in arrows_named(els) if a not in before and "Postgres" not in a]
-    assert not extra, "Enter added arrows that are not connections of the node just added: %s" % extra
+    assert len(arrows_named(els)) == len(before) + 1, "Enter after the connection added more arrows: %s" % arrows_named(els)
+
+    # 3b. A node that could connect to several others: Enter still takes one connection only.
+    type_enter(page, "auth service")
+    type_enter(page, "metrics")
+    els = board(skot, 5)
+    opts = read_options(page)
+    links = [o for o in opts if o["category"] == "connect"]
+    assert len(links) >= 2 and opts[0]["active"], "Metrics should have several connections on offer: %s" % [o["title"] for o in opts]
+    n_arrows = len(arrows_named(els))
+    for _ in range(4):
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(400)
+    page.wait_for_timeout(500)
+    shot(page, evidence, "enter-needs-pick", "3b-one-connection-only")
+    els = skot.elements()
+    assert len(arrows_named(els)) == n_arrows + 1, \
+        "four Enters must accept one connection, not chain through the rest: %s" % arrows_named(els)[n_arrows:]
+    assert len([e for e in els if is_shape(e)]) == 5
 
     # 4. Clicking a node shows its suggestions; Enter does not add any of them.
     skot.clear()
@@ -95,7 +115,7 @@ def test_enter_needs_pick(page, skot, evidence, ai):
     page.keyboard.press("Enter")
     page.wait_for_timeout(900)
     els = skot.elements()
-    assert len([e for e in els if is_shape(e)]) == 3 and len(arrows_named(els)) == n_arrows, \
+    assert len([e for e in els if is_shape(e)]) == 5 and len(arrows_named(els)) == n_arrows, \
         "Enter after a click added something: %s %s" % (labels(skot), arrows_named(els))
     evidence.note(nodes=labels(skot), arrows=arrows_named(els))
     assert_no_console_errors(evidence)
