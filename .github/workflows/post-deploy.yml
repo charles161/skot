@@ -2,19 +2,16 @@ name: Post-deploy verify
 
 # Runs the read-only production subset of the feature suite (features with `prod: true` in
 # verify/features.yml: no drawing, no AI calls) against https://skot.lightslips.ai:
-#   - after Vercel reports a production deployment (repository_dispatch, sent by the Vercel GitHub app:
-#     https://vercel.com/docs/git/vercel-for-github#repository-dispatch-events),
-#   - every 6 hours as a backstop in case dispatch events are not enabled or get lost,
+#   - when Vercel marks main's head deployed (its "Vercel" commit status: this repo gets no repository_dispatch
+#     or deployment_status from Vercel, and a push trigger can't work, as the Gate moves main with GITHUB_TOKEN),
+#   - every 6 hours as a backstop (GitHub delays or drops these),
 #   - on demand (Actions > Post-deploy verify > Run workflow).
-# repository_dispatch and schedule only run from the workflow file on the default branch (main):
+# status and schedule only run from the workflow file on the default branch (main):
 # https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows
 # A failure opens (or comments on) a GitHub issue labelled prod-verify with the evidence.
 
 on:
-  repository_dispatch:
-    types:
-      - vercel.deployment.success
-      - vercel.deployment.promoted
+  status:
   schedule:
     - cron: "17 */6 * * *"
   workflow_dispatch:
@@ -22,17 +19,20 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: post-deploy
-  cancel-in-progress: false
-
 env:
   PROD_URL: https://skot.lightslips.ai
 
 jobs:
   verify-prod:
     name: Production subset
-    if: github.event_name != 'repository_dispatch' || github.event.client_payload.environment == 'production'
+    # github.sha is main's head here, so a preview's status (same context, commit not on main yet) doesn't match.
+    if: >-
+      github.event_name != 'status' ||
+      (github.event.context == 'Vercel' && github.event.state == 'success' &&
+      github.event.sender.login == 'vercel[bot]' && github.event.sha == github.sha)
+    concurrency:
+      group: post-deploy
+      cancel-in-progress: false
     # Pinned: Playwright 1.58 has no Chromium build or deps for ubuntu-latest (26.04).
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -42,8 +42,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # The checks come from the commit Vercel deployed (dispatch), else from main.
-          ref: ${{ github.event.client_payload.git.sha || github.sha }}
+          # main's head: on a status, the commit Vercel just deployed.
+          ref: ${{ github.sha }}
 
       - uses: actions/setup-python@v5
         with:
@@ -78,7 +78,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           TRIGGER: ${{ github.event_name }} ${{ github.event.action }}
-          DEPLOYED: ${{ github.event.client_payload.git.sha || 'n/a' }}
+          DEPLOYED: ${{ github.event.sha || 'n/a' }}
         run: |
           gh label create prod-verify --color B60205 \
             --description "Production feature verification failed" 2>/dev/null || true
