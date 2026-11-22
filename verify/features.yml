@@ -106,6 +106,15 @@ features:
       - src/components/jev/PredictionHud.tsx
       - src/app/api/jev/decide/route.ts
 
+  - id: call-budget
+    title: "Drawing does not drain the AI budget: nothing is asked while a shape, label or arrow is in progress; a
+      settled add, arrow, click or drag costs one call; a 6-node, 5-arrow board drawn quickly costs at most 3, and
+      Fork right after it still reaches the model"
+    check: call-budget
+    sources:
+      - src/lib/jev/settled-ask.ts
+      - src/components/jev/JevWorkspace.tsx
+
   - id: first-screen
     title: "6A: the first screen is the bar and one Examples button; starters, practice and starter boards are
       behind it; typing a name still just works"

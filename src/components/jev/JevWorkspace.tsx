@@ -100,6 +100,7 @@ import {
   type ContextSuggestion,
 } from "@/lib/jev/prediction-engine";
 import { SelectionSuggestTrigger } from "@/lib/jev/selection-trigger";
+import { SettledAsk } from "@/lib/jev/settled-ask";
 import {
   type BoardEditDelta,
   serializeBoardToGraph,
@@ -256,6 +257,27 @@ interface RecoveryToastState {
   savedSnapshotsCount: number;
 }
 
+interface RankOptions {
+  signal?: AbortSignal;
+  onRanked?: (top: PredictedAction[]) => void;
+  /** False keeps the pool as is: no LLM-proposed nodes are mixed in (pen-stroke conversions). */
+  mergeContext?: boolean;
+  /**
+   * The options on screen keep their order and the highlight: jev's scores are written onto them, and the
+   * node the context route named from the board is added after them.
+   */
+  keepOrder?: boolean;
+}
+
+/** One rank_actions request waiting for the board to settle; `shown` is the suggestion list it is about. */
+interface RankJob {
+  intent: SpatialIntent;
+  els: JevElement[];
+  pool: PredictedAction[];
+  shown: PredictedAction[];
+  opts: RankOptions;
+}
+
 interface ForkSessionState {
   /** "pressure" asks what has to give before any take is generated. */
   phase: "pressure" | "takes";
@@ -402,6 +424,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   }, [activePredIdx]);
   const [telemetry, setTelemetry] = useState<JevTelemetry | null>(null);
   const decideAbortRef = useRef<AbortController | null>(null);
+  const rankAskRef = useRef<SettledAsk<RankJob> | null>(null);
   const showSelectionPredictionsRef = useRef<(key: string, signal: AbortSignal) => void>(() => {});
   const selectionTriggerRef = useRef<SelectionSuggestTrigger | null>(null);
 
@@ -518,20 +541,11 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       nextIntent: SpatialIntent,
       currentEls: JevElement[],
       pool: PredictedAction[],
-      opts: {
-        signal?: AbortSignal;
-        onRanked?: (top: PredictedAction[]) => void;
-        /** False keeps the pool as is: no LLM-proposed nodes are mixed in (pen-stroke conversions). */
-        mergeContext?: boolean;
-        /**
-         * The options on screen keep their order and the highlight: jev's scores are written onto them, and the
-         * node the context route named from the board is added after them.
-         */
-        keepOrder?: boolean;
-      } = {}
+      opts: RankOptions = {}
     ) => {
       if (aiQuietRef.current) return;
       if (pool.length === 0) return;
+      if (opts.signal?.aborted) return;
 
       decideAbortRef.current?.abort();
       const controller = new AbortController();
@@ -657,6 +671,48 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       } catch {
         setTelemetry((prev) => (prev ? { ...prev, evaluating: false } : null));
       }
+    },
+    []
+  );
+
+  // The one way a rank_actions request leaves the browser: after the board settles, and only the latest one.
+  useEffect(() => {
+    const ask = new SettledAsk<RankJob>({
+      send: (job) => void rankWithTypeSafeJev(job.intent, job.els, job.pool, job.opts),
+    });
+    rankAskRef.current = ask;
+    const touch = () => ask.touch();
+    window.addEventListener("pointerdown", touch, true);
+    window.addEventListener("pointerup", touch, true);
+    window.addEventListener("keydown", touch, true);
+    return () => {
+      ask.cancel();
+      window.removeEventListener("pointerdown", touch, true);
+      window.removeEventListener("pointerup", touch, true);
+      window.removeEventListener("keydown", touch, true);
+      rankAskRef.current = null;
+    };
+  }, [rankWithTypeSafeJev]);
+
+  useEffect(() => {
+    rankAskRef.current?.setBusy(canvasInteracting || tool !== "select" || Boolean(forkSession));
+  }, [canvasInteracting, tool, forkSession]);
+
+  useEffect(() => {
+    rankAskRef.current?.dropUnless((job) => job.shown === predictions);
+  }, [predictions]);
+
+  /** Asks the AI about the suggestions just shown, once the board settles. `shown` is the list on screen. */
+  const askWhenSettled = useCallback(
+    (
+      nextIntent: SpatialIntent,
+      currentEls: JevElement[],
+      pool: PredictedAction[],
+      shown: PredictedAction[],
+      opts: RankOptions = {}
+    ) => {
+      if (aiQuietRef.current || pool.length === 0) return;
+      rankAskRef.current?.request({ intent: nextIntent, els: currentEls, pool, shown, opts });
     },
     []
   );
@@ -1051,8 +1107,9 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
 
   /**
    * Shows the options at once (all local, instant). While the user is typing nothing is asked of the AI
-   * (`ask: false`). After a node is added, applied or clicked there is one call: the context route names a
-   * next node from the board and jev scores the options. The highlight only moves when the user moves it.
+   * (`ask: false`). After a node is added, applied or clicked there is one call, sent once the board settles:
+   * the context route names a next node from the board and jev scores the options. The highlight only moves
+   * when the user moves it.
    */
   const presentNextOptions = useCallback(
     (
@@ -1067,11 +1124,12 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       optionsTouchedRef.current = Boolean(opts.keepMinimal);
       recordSuggestionShown(getBrowserStorage(), result.options.flatMap((o) => o.feedbackKeys ?? []));
       decideAbortRef.current?.abort();
+      rankAskRef.current?.cancel();
       setTelemetry(null);
       if (opts.ask === false) return;
-      void rankWithTypeSafeJev(result.intent, els, result.options, { keepOrder: true, signal: opts.signal });
+      askWhenSettled(result.intent, els, result.options, result.options, { keepOrder: true, signal: opts.signal });
     },
-    [rankWithTypeSafeJev]
+    [askWhenSettled]
   );
 
   /** What Tab completes the typed text to; the same concept the options are built from. */
@@ -1237,9 +1295,9 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       }
       setPredictions(top3);
       setActivePredIdx(0);
-      void rankWithTypeSafeJev(nextIntent, currentEls, adapted, rankOpts);
+      askWhenSettled(nextIntent, currentEls, adapted, top3, rankOpts);
     },
-    [rankWithTypeSafeJev]
+    [askWhenSettled]
   );
 
   const refreshPredictions = useCallback(
