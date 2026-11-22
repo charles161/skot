@@ -52,7 +52,7 @@ export function PracticePicker({ open, onOpenChange, boardHasContent, onStart }:
         </ul>
 
         {boardHasContent && (
-          <p className="text-[11px] text-muted-foreground">Starting clears this board. Undo brings it back.</p>
+          <p className="text-[11px] text-muted-foreground">Starting opens a new board. This one stays in My boards.</p>
         )}
       </DialogContent>
     </Dialog>

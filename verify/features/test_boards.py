@@ -341,6 +341,145 @@ def test_board_two_tabs(page, app, prod_like, evidence):
     evidence.note(a=3, b=3, c=2)
 
 
+def two_tabs(page, app, prod_like, evidence, board):
+    other = page.context.new_page()
+    evidence.watch(other, "other tab")
+    other.goto("%s/b/%s" % (prod_like, board))
+    tab = Driver(other, prod_like)
+    at_board(tab, board)
+    tab.settle(800)
+    page.bring_to_front()
+    return tab
+
+
+def seed_board(page, base, board, elements, **record):
+    page.goto(base + "/api/health")
+    page.evaluate("([k, v]) => localStorage.setItem(k, v)",
+                  ["jev_board_" + board, json.dumps(dict({"elements": elements, "hasLocalEdits": True}, **record))])
+
+
+def node_at(i, when, label=None):
+    return {"id": "n%d" % i, "kind": "node", "x": (i % 27) * 200, "y": (i // 27) * 120, "width": 172, "height": 72,
+            "label": label or "N%d" % i, "tone": "ink", "seed": i + 1, "createdAt": when, "updatedAt": when}
+
+
+@check("board-stale-tab-old")
+def test_board_stale_tab_old(page, app, prod_like, evidence):
+    days = 30
+    then = int(datetime.datetime.now().timestamp() * 1000) - days * 86400000
+    board = "agedboard_AAAAAAAAAAAAA"
+    seed_board(page, prod_like, board, [node_at(0, then, "Gateway"), node_at(1, then, "Orders")],
+               boardEpoch="bep_0123456789abcdef", boardEpochCreatedAt=then, baseTimestamp=then)
+    page.goto(prod_like + "/b/" + board)
+    at_board(app, board)
+    other = two_tabs(page, app, prod_like, evidence, board)
+    # A tab of an earlier build outlives the deploy: it only hears BroadcastChannel, and refuses what says it is old.
+    earlier_build = page.context.new_page()
+    earlier_build.goto(prod_like + "/api/health")
+    earlier_build.evaluate("""room => {
+        window.heard = [];
+        new BroadcastChannel('jev-room-' + room).onmessage = e => {
+            if (e.data && e.data.kind === 'sync_state') window.heard.push(e.data) };
+    }""", board)
+    page.bring_to_front()
+    type_node(app, "Search")
+    type_node(app, "Billing")
+    other.page.wait_for_function(HAS, arg="Billing", timeout=6000)
+    earlier_build.wait_for_function(
+        """() => heard.some(m => m.elements.some(e => e.label === 'Billing') && m.baseTimestamp === undefined
+                                 && !m.tombstoneHorizonAt && !m.tombstoneHorizonRev)""", timeout=6000)
+    page.close(run_before_unload=True)
+    other.page.bring_to_front()
+    other.page.get_by_label(TITLE).fill("Renamed in the other tab")
+    type_node(other, "Mailer")
+    assert labels(other.page, board) == ["Billing", "Gateway", "Mailer", "Orders", "Search"]
+    other.page.reload()
+    other.page.wait_for_function(HAS, arg="Billing", timeout=20000)
+    evidence.note(days=days, kept=5)
+    assert_no_console_errors(evidence)
+
+
+@check("board-stale-tab-rearranged")
+def test_board_stale_tab_rearranged(page, app, prod_like, evidence):
+    board = app.new_board()
+    type_node(app, "Alpha")
+    other = two_tabs(page, app, prod_like, evidence, board)
+    # All of a one-node board changes: the guard for a hostile peer used to pause the user's own tab here.
+    app.click_element("Alpha")
+    page.keyboard.press("F2")
+    editor = app.edit_input()
+    editor.fill("Alpha Moved")
+    editor.press("Enter")
+    page.wait_for_timeout(800)
+    type_node(app, "Kafka")
+    other.page.wait_for_function(HAS, arg="Kafka", timeout=6000)
+    assert not other.page.get_by_text("made large changes").count(), "the user's own tab was treated as an attacker"
+    page.close(run_before_unload=True)
+    other.page.bring_to_front()
+    type_node(other, "Later")
+    assert labels(other.page, board) == ["Alpha Moved", "Kafka", "Later"]
+    evidence.note(kept=3)
+    assert_no_console_errors(evidence)
+
+
+@check("board-stale-tab-big")
+def test_board_stale_tab_big(page, app, prod_like, evidence):
+    then = int(datetime.datetime.now().timestamp() * 1000) - 3600000
+    board = "bigboard_AAAAAAAAAAAAAA"
+    seed_board(page, prod_like, board, [node_at(i, then) for i in range(540)], boardTitle="Big")
+    page.goto(prod_like + "/b/" + board)
+    at_board(app, board)
+    other = two_tabs(page, app, prod_like, evidence, board)
+    app.clear()
+    open_menu(page, "Blank Sheet")
+    page.wait_for_timeout(800)
+    type_node(app, "Fresh Work")
+    other.page.wait_for_function(HAS, arg="Fresh Work", timeout=8000)
+    page.close(run_before_unload=True)
+    other.page.bring_to_front()
+    other.page.get_by_label(TITLE).fill("Renamed by the other tab")
+    other.settle(1000)
+    assert labels(other.page, board) == ["Fresh Work"]
+    evidence.note(kept=1)
+
+
+@check("board-replace-keeps")
+def test_board_replace_keeps(page, app, prod_like, evidence):
+    mine = app.new_board()
+    type_node(app, "Mine")
+    for item in ("URL shortener", "Load Starter Canvas", "Practice a problem"):
+        page.goto("%s/b/%s" % (prod_like, mine))
+        at_board(app, mine)
+        app.settle(700)
+        open_menu(page, item)
+        if item.startswith("Practice"):
+            page.get_by_role("dialog").get_by_role("button", name=re.compile("^URL shortener")).click()
+        page.wait_for_function("id => /\\/b\\//.test(location.pathname) && !location.pathname.endsWith(id)", arg=mine,
+                               timeout=15000)
+        app.wait_board()
+        app.settle(900)
+        assert labels(page, mine) == ["Mine"], "%s replaced the board" % item
+        if item.startswith("Practice"):
+            page.get_by_role("timer").wait_for(timeout=10000)
+        else:
+            assert drawn(page) > 1, "%s did not draw" % item
+
+    page.goto("%s/b/%s" % (prod_like, mine))
+    at_board(app, mine)
+    app.settle(700)
+    open_menu(page, "Blank Sheet")
+    app.settle(900)
+    page.reload()
+    at_board(app, mine)
+    app.settle(700)
+    assert not labels(page, mine)
+    open_menu(page, "Restore earlier copy")
+    page.get_by_role("dialog", name="Restore earlier copy").get_by_role("listitem").first.get_by_role("button").click()
+    page.wait_for_function(HAS, arg="Mine", timeout=10000)
+    evidence.note(kept=4)
+    assert_no_console_errors(evidence)
+
+
 @check("board-unknown")
 def test_board_unknown(page, app, prod_like, evidence, shot):
     mine = app.new_board()

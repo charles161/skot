@@ -12,7 +12,7 @@ import {
   type BoardAddress,
   type BoardStorage,
 } from "./boards";
-import { generateRoomCredentials, ROOM_ID_PATTERN } from "./room-auth";
+import { boardPath, generateRoomCredentials, ROOM_ID_PATTERN } from "./room-auth";
 import { readSavedBoard } from "./saved-board";
 import { boardStorageKey } from "./storage-keys";
 
@@ -135,6 +135,18 @@ describe("boards the live build saved keep working", () => {
     expect(storage.writes).toEqual([]);
   });
 
+  it("a board that can't be opened never takes over /, however new it is", () => {
+    const storage = prod();
+    const id = "futurebuild_AAAAAAAAAAAA";
+    storage.map.set(boardStorageKey(id), board({ elements: [{ id: "x", kind: "from-a-newer-build" }], editedAt: NOW }));
+    expect(opened(storage).roomId).toBe(oldLink("latest").id);
+    expect(listBoards(storage, NOW).map((b) => b.id)).toContain(id);
+  });
+
+  it("a damaged key can't crash the list's links", () => {
+    expect(() => boardPath("\ud800bad")).not.toThrow();
+  });
+
   it("a board saved before ids were 128-bit is neither hidden nor refused", () => {
     const storage = new MemoryStorage({ [boardStorageKey("jev-ab12")]: board() });
     expect(listBoards(storage, NOW).map((b) => b.id)).toEqual(["jev-ab12"]);
@@ -149,6 +161,11 @@ describe("boards the live build saved keep working", () => {
     storage.map.set(boardStorageKey(id), raw);
     expect(listBoards(storage, NOW)[0]).toMatchObject({ id, edited: NOW - 5 });
     expect(readSavedBoard(raw).kind).toBe("board");
+  });
+
+  it("an impossible timestamp falls back on the times in the board", () => {
+    const storage = new MemoryStorage({ [boardStorageKey("past")]: board({ editedAt: -1e20 }) });
+    expect(listBoards(storage, NOW)[0].edited).toBe(NOW - 1000);
   });
 
   it("a timestamp from the future cannot pin a board above later edits", () => {

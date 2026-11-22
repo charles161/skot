@@ -7,7 +7,7 @@ import { flushSync } from "react-dom";
 import { AiQuietContext, postDecide } from "@/lib/jev/ai-quiet";
 import { getPracticePrompt, type PracticePromptId } from "@/lib/jev/practice-prompts";
 import type { ReviewComment } from "@/lib/jev/practice-review";
-import { parsePracticeSession, practiceStorageKey, type PracticeSession } from "@/lib/jev/practice-session";
+import { parsePracticeSession, practiceStorageKey, startPracticeSession, storePracticeSession, type PracticeSession } from "@/lib/jev/practice-session";
 import { useBoardTheme } from "@/lib/theme-store";
 import { IconActor, IconArrow, IconBox, IconBroadcast, IconClose, IconDatabase, IconDiamond, IconDownload, IconFit, IconFork, IconFrame, IconHand, IconMinus, IconMoon, IconPacks, IconPen, IconPlus, IconRedo, IconReset, IconSelect, IconSpark, IconSun, IconTarget, IconText, IconTrash, IconUndo } from "@/brand/icons";
 import {
@@ -309,6 +309,11 @@ function getBrowserStorage() {
     return null; // reading window.localStorage throws when the browser blocks it
   }
 }
+
+const BLANK_NOT_KEPT = {
+  tone: "error",
+  text: "Not cleared: this browser couldn't keep a copy of this board. Use Save board (.json) first.",
+} as const;
 
 const RESTORE_NOT_KEPT = {
   tone: "error",
@@ -789,18 +794,27 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     const rid = creds.roomId;
     const rsecret = creds.roomSecret;
 
+    // With collaboration off the only listeners are tabs of earlier builds, which refuse what says it is a day old.
+    const stalenessForPeers = (
+      state: Pick<BroadcastSyncPayload, "tombstoneHorizonRev" | "tombstoneHorizonAt" | "baseTimestamp">
+    ) =>
+      collabEnabledRef.current
+        ? {
+            tombstoneHorizonRev: state.tombstoneHorizonRev,
+            tombstoneHorizonAt: state.tombstoneHorizonAt,
+            baseTimestamp: state.baseTimestamp,
+          }
+        : { tombstoneHorizonRev: 0, tombstoneHorizonAt: 0 };
     const throttler = new BroadcastThrottler<BroadcastSyncPayload>(
       (payload) => {
         collabRef.current?.broadcastState(payload.elements, payload.boardTitle, {
           titleRev: payload.titleRev,
           titleUpdatedBy: payload.titleUpdatedBy,
           tombstones: payload.tombstones,
-          tombstoneHorizonRev: payload.tombstoneHorizonRev,
-          tombstoneHorizonAt: payload.tombstoneHorizonAt,
+          ...stalenessForPeers(payload),
           boardEpoch: payload.boardEpoch,
           boardEpochCreatedAt: payload.boardEpochCreatedAt,
           baseRev: payload.baseRev,
-          baseTimestamp: payload.baseTimestamp,
           hasLocalEdits: payload.hasLocalEdits,
         });
       },
@@ -874,6 +888,36 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         loadedRaw,
         now: initNow,
         canSave: () => canPersistRef.current,
+        adopt: (next) => {
+          const title = next.boardTitle ?? boardTitleRef.current;
+          const sameOnScreen = sameBoard({ elements: elementsRef.current, boardTitle: boardTitleRef.current }, next);
+          const wasEmpty = elementsRef.current.length === 0;
+          elementsRef.current = next.elements;
+          boardTitleRef.current = title;
+          titleRevRef.current = next.titleRev ?? 0;
+          titleUpdatedByRef.current = next.titleUpdatedBy ?? "";
+          tombstonesRef.current = next.tombstones ?? {};
+          tombstoneHorizonRevRef.current = next.tombstoneHorizonRev ?? 0;
+          tombstoneHorizonAtRef.current = next.tombstoneHorizonAt ?? 0;
+          if (next.boardEpoch) boardEpochRef.current = next.boardEpoch;
+          if (next.boardEpochCreatedAt !== undefined) boardEpochCreatedAtRef.current = next.boardEpochCreatedAt;
+          baseTimestampRef.current = next.baseTimestamp ?? baseTimestampRef.current;
+          hasLocalEditsRef.current = next.hasLocalEdits ?? true;
+          canPersistRef.current = true;
+          const history = getHistory();
+          if (sameOnScreen) {
+            history.replaceWithoutHistory(next.elements);
+          } else {
+            // As with a peer's change: undo must not take the other tab's work back, nor a drag its stale snapshot.
+            history.applyRemote(next.elements, { clearHistory: true });
+            remoteSyncGenerationRef.current = history.remoteSyncGeneration;
+            setHistoryCounts({ undo: 0, redo: 0 });
+          }
+          setJoiningSharedRoom(false);
+          setElements(next.elements);
+          setBoardTitle(title);
+          if (wasEmpty && next.elements.length > 0) fitToView(next.elements);
+        },
         read: () => ({
           elements: elementsRef.current,
           boardTitle: boardTitleRef.current,
@@ -933,6 +977,9 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       {
         onPeersChange: (list) => setRemotePeers(list),
         onRemoteState: (remoteEls, remoteTitle, meta) => {
+          // Collaboration off: every peer is this person's own tab, followed through storage. The peer rules refuse
+          // and pause changes they distrust, and a refused tab would go on to save over the work.
+          if (!collabEnabledRef.current) return;
           const now = Date.now();
           const localSync: BoardSyncState = {
             elements: elementsRef.current,
@@ -1074,8 +1121,11 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
           titleRev: titleRevRef.current,
           titleUpdatedBy: titleUpdatedByRef.current || collab.peerId,
           tombstones: tombstonesRef.current,
-          tombstoneHorizonRev: tombstoneHorizonRevRef.current,
-          tombstoneHorizonAt: tombstoneHorizonAtRef.current,
+          ...stalenessForPeers({
+            tombstoneHorizonRev: tombstoneHorizonRevRef.current,
+            tombstoneHorizonAt: tombstoneHorizonAtRef.current,
+            baseTimestamp: baseTimestampRef.current,
+          }),
           boardEpoch: boardEpochRef.current,
           boardEpochCreatedAt: boardEpochCreatedAtRef.current,
           baseRev: computeMaxKnownRev({
@@ -1084,7 +1134,6 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
             titleRev: titleRevRef.current,
             tombstoneHorizonRev: tombstoneHorizonRevRef.current,
           }),
-          baseTimestamp: baseTimestampRef.current,
           hasLocalEdits: hasLocalEditsRef.current,
         }),
         onStatusChange: (status) => setCollabStatus(status),
@@ -1094,6 +1143,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         signaling: collabEnabledRef.current,
       }
     );
+    // Started even with collaboration off: a tab left open across a deploy hears this tab no other way.
     collab.start();
     collabRef.current = collab;
 
@@ -2943,10 +2993,15 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     selectionTriggerRef.current?.select(ids);
   }, [forkSession]);
 
+  // Plain / shows the board edited last, so what used to fill a blank first screen must not replace a board.
   const resetToStarter = () => {
+    const fresh = createStarterElements();
+    if (elementsRef.current.length > 0) {
+      boardFile.openAsNew({ elements: fresh, boardTitle: DEFAULT_BOARD_TITLE });
+      return;
+    }
     forkAbortRef.current?.abort();
     setForkSession(null);
-    const fresh = createStarterElements();
     updateElements(() => fresh);
     setSelectedIds([]);
     setInspectorOpen(false);
@@ -2958,10 +3013,14 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   const loadStarterBoard = (boardId: string) => {
     const board = findStarterBoard(boardId);
     if (!board) return;
+    const fresh = board.build();
+    if (elementsRef.current.length > 0) {
+      boardFile.openAsNew({ elements: fresh, boardTitle: board.title });
+      return;
+    }
     forkAbortRef.current?.abort();
     setForkSession(null);
     setJoiningSharedRoom(false);
-    const fresh = board.build();
     updateElements(() => fresh);
     boardTitleRef.current = board.title;
     setBoardTitle(board.title);
@@ -2974,6 +3033,11 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   };
 
   const clearBoard = () => {
+    const current = { elements: elementsRef.current, boardTitle: boardTitleRef.current, hasLocalEdits: true };
+    if (!saveBeforeRestore(getBrowserStorage(), roomId, current, Date.now())) {
+      showBoardNotice(BLANK_NOT_KEPT);
+      return;
+    }
     forkAbortRef.current?.abort();
     setForkSession(null);
     updateElements(() => []);
@@ -2987,19 +3051,23 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   const startPractice = (promptId: PracticePromptId) => {
     const prompt = getPracticePrompt(promptId);
     if (!prompt) return;
+    if (elementsRef.current.length > 0) {
+      setPracticePickerOpen(false);
+      const session = startPracticeSession(promptId, Date.now());
+      boardFile.openAsNew({ elements: [], boardTitle: DEFAULT_BOARD_TITLE }, (id) =>
+        storePracticeSession(window.localStorage, id, session)
+      );
+      return;
+    }
     aiQuietRef.current = true;
     decideAbortRef.current?.abort();
     morphAbortRef.current?.abort();
     setMorphEvaluating(false);
     selectionTriggerRef.current?.dismiss();
-    if (elementsRef.current.length > 0) {
-      clearBoard();
-    } else {
-      forkAbortRef.current?.abort();
-      setForkSession(null);
-      setPredictions([]);
-      setIntent(null);
-    }
+    forkAbortRef.current?.abort();
+    setForkSession(null);
+    setPredictions([]);
+    setIntent(null);
     setThoughtPrompt("");
     setJoiningSharedRoom(false);
     setActiveCommentId(null);

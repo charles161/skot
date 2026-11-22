@@ -3,15 +3,8 @@
 import { IconDownload, IconWarning } from "@/brand/icons";
 import { Button } from "@/components/ui/button";
 import { appUrl } from "@/lib/base-path";
-
-export function downloadSavedCopy(raw: string) {
-  const url = URL.createObjectURL(new Blob([raw], { type: "application/json" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "skot-board-saved-copy.json";
-  link.click();
-  URL.revokeObjectURL(url);
-}
+import { MyBoardsButton } from "./MyBoards";
+import { downloadSavedCopy } from "./download-saved-copy";
 
 /** Shown in place of a board whose saved copy can't be read. Nothing here writes or deletes it. */
 export function UnreadableBoard({ raw }: { raw: string }) {
@@ -34,6 +27,7 @@ export function UnreadableBoard({ raw }: { raw: string }) {
           <Button type="button" variant="outline" onClick={() => window.location.assign(appUrl("/new"))}>
             Start a new board
           </Button>
+          <MyBoardsButton />
         </div>
       </div>
     </main>

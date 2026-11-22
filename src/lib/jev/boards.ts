@@ -8,6 +8,7 @@ import {
   type StorageLike,
 } from "./recovery-buffer";
 import { boardPath, generateRoomCredentials, ROOM_ID_PATTERN, ROOM_SECRET_PATTERN, type RoomCredentials } from "./room-auth";
+import { readSavedBoard } from "./saved-board";
 import { boardStorageKey } from "./storage-keys";
 
 /*
@@ -84,7 +85,7 @@ export function parseBoardData(raw: string | null): BoardData | null {
 /** Null if it was never edited. Boards saved before `editedAt` existed go by the newest time they hold. */
 export function lastEdited(data: BoardData | null, now: number): number | null {
   if (!data) return null;
-  if (typeof data.editedAt === "number" && Number.isFinite(data.editedAt)) return Math.min(data.editedAt, now);
+  if (typeof data.editedAt === "number" && data.editedAt >= 0) return Math.min(data.editedAt, now);
   if (data.elements.length === 0 && !data.hasLocalEdits) return null;
   let newest = 0;
   const consider = (value: unknown) => {
@@ -229,8 +230,11 @@ export function resolveBoard(
   let { id } = address;
   if (id === null) {
     if (!address.create) {
-      const last = listBoards(readable, now)[0];
-      if (last && last.edited !== null) id = last.id;
+      // A board that can't be opened stays in My boards: at / it would hide every other one.
+      const last = listBoards(readable, now).find(
+        (b) => b.edited !== null && readSavedBoard(readable!.getItem(boardStorageKey(b.id))).kind !== "unreadable"
+      );
+      if (last) id = last.id;
       // Looking at / again and again must not make board after board.
       else id = readNewBoards(readable).find((b) => readable && !isKept(readable, b.roomId))?.roomId ?? null;
     }

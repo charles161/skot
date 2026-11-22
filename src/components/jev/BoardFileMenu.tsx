@@ -61,8 +61,9 @@ export function useImportFragment(onNotice: (notice: BoardNotice) => void): bool
   return pendingHash !== null;
 }
 
-function stageFileBoard(snapshot: StoredBoardSnapshot): string {
+function stageNewBoard(snapshot: StoredBoardSnapshot, alsoStore?: (roomId: string) => void): string {
   const creds = stageImportedBoard(snapshot, window.localStorage);
+  alsoStore?.(creds.roomId);
   return `${appUrl("/")}${formatRoomHash(creds.roomId, creds.roomSecret)}`;
 }
 
@@ -73,6 +74,15 @@ export function useBoardFileActions(
 ) {
   const inputRef = useRef<HTMLInputElement>(null);
 
+  /** The board on screen is left as it is, in My boards. */
+  const openAsNew = (snapshot: StoredBoardSnapshot, alsoStore?: (roomId: string) => void) => {
+    try {
+      leave(() => stageNewBoard(snapshot, alsoStore));
+    } catch {
+      onNotice({ tone: "error", text: OPEN_FAILED_MESSAGE });
+    }
+  };
+
   const onFileChosen = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -82,11 +92,7 @@ export function useBoardFileActions(
       onNotice({ tone: "error", text: OPEN_FAILED_MESSAGE });
       return;
     }
-    try {
-      leave(() => stageFileBoard(snapshot));
-    } catch {
-      onNotice({ tone: "error", text: OPEN_FAILED_MESSAGE });
-    }
+    openAsNew(snapshot);
   };
 
   const fileInput = (
@@ -130,7 +136,7 @@ export function useBoardFileActions(
     }
   };
 
-  return { fileInput, openFile, saveFile, copyShareLink };
+  return { fileInput, openFile, saveFile, copyShareLink, openAsNew };
 }
 
 export function BoardFileMenuItems({ actions }: { actions: ReturnType<typeof useBoardFileActions> }) {

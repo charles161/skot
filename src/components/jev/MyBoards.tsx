@@ -102,6 +102,24 @@ export function MyBoardsDialog({ open, ...list }: MyBoardsDialogProps) {
   );
 }
 
+const leaveNow = (to: () => string) => window.location.assign(to());
+
+/** My boards where no board is on screen (missing or unreadable), so there is nothing to save first. */
+export function MyBoardsButton() {
+  const [open, setOpen] = useState(false);
+  const [hasBoards] = useState(() => listBoards(browserBoardStorage(), Date.now()).length > 0);
+  if (!hasBoards) return null;
+  return (
+    <>
+      <Button type="button" variant="outline" className="min-h-[44px]" onClick={() => setOpen(true)}>
+        <IconLayers className="h-4 w-4" aria-hidden="true" />
+        My boards
+      </Button>
+      <MyBoardsDialog open={open} onOpenChange={setOpen} onLeave={leaveNow} />
+    </>
+  );
+}
+
 export function BoardsMenuItems({ onOpen, onLeave }: { onOpen: () => void; onLeave: (to: () => string) => void }) {
   return (
     <>

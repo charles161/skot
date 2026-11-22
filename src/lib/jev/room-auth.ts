@@ -69,7 +69,8 @@ export function parseRoomHash(hash: string): RoomCredentials | null {
 }
 
 export function boardPath(roomId: string): string {
-  return appUrl(`/b/${encodeURIComponent(roomId)}`);
+  // A lone surrogate, from a damaged storage key, would make encodeURIComponent throw.
+  return appUrl(`/b/${encodeURIComponent(roomId.replace(/\p{Surrogate}/gu, "\uFFFD"))}`);
 }
 
 export function buildRoomShareUrl(origin: string, roomId: string, roomSecret: string): string {

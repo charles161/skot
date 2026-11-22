@@ -27,6 +27,9 @@ function setUp({ stored = SAVED as BoardRecord | null, canSave = true, id = "boa
     roomSecret: SECRET,
     read: () => live.board,
     canSave: () => live.canSave,
+    adopt: (board) => {
+      live.board = { ...board };
+    },
     loadedRaw: map.get(key) ?? null,
     now: 5000,
   });
@@ -102,7 +105,7 @@ describe("BoardSaver", () => {
     const live = { board: SAVED, canSave: false };
     const saver = new BoardSaver({
       storage: () => null, roomId: "x", roomSecret: "", read: () => live.board, canSave: () => live.canSave,
-      loadedRaw: null, now: 1,
+      adopt: () => {}, loadedRaw: null, now: 1,
     });
     expect(saver.save(2)).toBe("unchanged");
     live.canSave = true;

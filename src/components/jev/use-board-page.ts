@@ -11,6 +11,7 @@ import {
   type OpenBoard,
 } from "@/lib/jev/boards";
 import type { SaveOutcome } from "@/lib/jev/saved-board";
+import { boardStorageKey } from "@/lib/jev/storage-keys";
 
 const STAYED = {
   tone: "error",
@@ -100,8 +101,10 @@ class BoardPage {
       if (!this.saveToLeave()) event.preventDefault();
     };
     const onPageHide = () => void this.saveToLeave();
-    const onVisibility = () => {
-      if (document.visibilityState === "hidden") this.save();
+    // Hidden: save. Shown again: take in what was saved meanwhile.
+    const onVisibility = () => void this.save();
+    const onStorage = (event: StorageEvent) => {
+      if (this.shown && (event.key === null || event.key === boardStorageKey(this.shown.id))) this.save();
     };
     // Out of the back/forward cache the board in memory is as old as when it was left.
     const onPageShow = (event: PageTransitionEvent) => {
@@ -113,6 +116,7 @@ class BoardPage {
     window.addEventListener("pagehide", onPageHide);
     window.addEventListener("pageshow", onPageShow);
     document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("storage", onStorage);
     return () => {
       window.removeEventListener("popstate", onPopState, true);
       window.removeEventListener("hashchange", this.addressChanged);
@@ -120,6 +124,7 @@ class BoardPage {
       window.removeEventListener("pagehide", onPageHide);
       window.removeEventListener("pageshow", onPageShow);
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("storage", onStorage);
     };
   };
 }

@@ -5,7 +5,7 @@ import { IconDownload, IconReset } from "@/brand/icons";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { listSavedCopies, type StorageLike } from "@/lib/jev/recovery-buffer";
 import type { StoredBoardSnapshot } from "@/lib/jev/sync-validation";
-import { downloadSavedCopy } from "./UnreadableBoard";
+import { downloadSavedCopy } from "./download-saved-copy";
 
 interface RestoreCopyDialogProps {
   open: boolean;
@@ -55,7 +55,7 @@ function SavedCopies({ getStorage, roomId, onRestore }: Omit<RestoreCopyDialogPr
                   )}
                 </span>
                 <span className="truncate text-[11px] text-muted-foreground">
-                  {copy.entry.reason === "manual" ? "Before a restore: " : ""}
+                  {copy.entry.reason === "manual" ? "Replaced: " : ""}
                   {copy.entry.snapshot.boardTitle}
                 </span>
               </span>

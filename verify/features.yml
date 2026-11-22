@@ -585,6 +585,33 @@ features:
     sources:
       - src/components/jev/MissingBoard.tsx
 
+  - id: board-stale-tab-old
+    title: "Two tabs on a 30-day-old board: the stale tab's edit and title keep everything the other tab saved"
+    check: board-stale-tab-old
+    sources:
+      - src/lib/jev/board-tabs.ts
+      - src/lib/jev/board-saver.ts
+
+  - id: board-stale-tab-rearranged
+    title: "Changing most of a board in one tab never pauses the user's other tab or lets it save over the change"
+    check: board-stale-tab-rearranged
+    sources:
+      - src/lib/jev/board-tabs.ts
+
+  - id: board-stale-tab-big
+    title: "Two tabs on a board over 500 elements follow each other and keep the newer work"
+    check: board-stale-tab-big
+    sources:
+      - src/lib/jev/board-tabs.ts
+
+  - id: board-replace-keeps
+    title: "Starter boards, Load Starter Canvas and Practice open a new board when this one has content; Blank Sheet
+      keeps a copy that survives a reload"
+    check: board-replace-keeps
+    sources:
+      - src/components/jev/JevWorkspace.tsx
+      - src/components/jev/PracticePicker.tsx
+
   - id: board-storage-full
     title: "Full storage: no board is evicted, and a board that can't be saved is not left"
     check: board-storage-full

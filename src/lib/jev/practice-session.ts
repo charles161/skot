@@ -23,6 +23,11 @@ export function startPracticeSession(promptId: PracticePromptId, now: number): P
   return { promptId, startedAt: now, durationMs: minutes * 60_000, pausedAt: null, pausedMs: 0, endedAt: null, phase: "drawing", review: null };
 }
 
+/** For a board about to be opened: it restores the session as it loads. */
+export function storePracticeSession(storage: Pick<Storage, "setItem">, roomId: string, session: PracticeSession): void {
+  storage.setItem(practiceStorageKey(roomId), JSON.stringify(session));
+}
+
 export function remainingMs(s: PracticeSession, now: number): number {
   const clockNow = s.endedAt ?? s.pausedAt ?? now;
   return Math.max(0, s.durationMs - (clockNow - s.startedAt - s.pausedMs));
