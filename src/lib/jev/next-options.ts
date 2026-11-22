@@ -875,6 +875,8 @@ interface Context {
    * option that contains the same thing builds around it, so the ghost stays put when Tab moves to that option.
    */
   pinnedId?: string;
+  /** A typed flow is drawn exactly as typed: its nodes are not also linked to the board. */
+  standalone?: boolean;
 }
 
 interface Materialized {
@@ -980,6 +982,7 @@ function materialize(draft: Draft, ctx: Context): Materialized {
   const attachTo = anchor ?? nearestShape(boardShapes, ctx.viewportCenter);
   const rootFresh = fresh[0]?.id;
   for (const f of fresh) {
+    if (ctx.standalone) continue;
     if (boardShapes.length > 0 && attachTo && find(f.id) !== find(BOARD)) {
       addEdge(attachTo.id, f.id);
       unite(f.id, BOARD);
@@ -1254,7 +1257,9 @@ function materializeAround(draft: Draft, ctx: Context, pinnedCtx: Context | null
  * `typed` is the node Enter creates for the Thought Bar text: it is option (a) as is, and the cluster and full
  * options grow from there. A typed flow ("app -> api") is exactly its own nodes and arrows, never padded.
  */
-function finish(drafts: Draft[], ctx: Context, typed: PredictedAction | null, exact: boolean): PredictedAction[] | null {
+function finish(drafts: Draft[], base: Context, typed: PredictedAction | null, exact: boolean): PredictedAction[] | null {
+  // A typed flow keeps to the arrows the user typed: no extra link to the board (connections are never forced).
+  const ctx: Context = exact ? { ...base, standalone: true } : base;
   const pinnedCtx = typed ? pinTypedNode(ctx, typed.addElements[0]) : null;
   const build = (draft: Draft, bigger: boolean): Materialized => materializeAround(draft, ctx, bigger ? pinnedCtx : null);
   const built = drafts.map((d, i) => ({ draft: d, m: build(d, i > 0) }));

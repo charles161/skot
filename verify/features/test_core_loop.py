@@ -258,6 +258,23 @@ def test_core_loop_connections_suggested(page, skot, evidence, ai):
     assert (arrow["fromId"], arrow["toId"]) == (gw["id"], pg["id"]), "accepted link should be API Gateway -> Postgres: %s" % arrows_named(els)
     assert len([e for e in els if is_shape(e)]) == 3, "accepting a link must not add nodes"
     assert bar_of(page).input_value() == "" and bar_of(page).evaluate("el => el === document.activeElement")
+
+    # A typed flow draws the arrows that were typed and no others (second judge, prod 22 Nov: App -> Worker appeared).
+    page.keyboard.press("Escape")
+    before = len(skot.arrows())
+    bar_of(page).click()
+    page.keyboard.type("worker -> queue", delay=25)
+    page.keyboard.press("Enter")
+    els = board(skot, 5)
+    page.wait_for_timeout(400)
+    els = skot.elements()
+    shot(page, evidence, "core-loop-connections-suggested", "4-flow")
+    by_label = {e["label"]: e for e in els if is_shape(e)}
+    new = [a for a in els if a.get("kind") == "arrow" and by_label["Worker"]["id"] in (a["fromId"], a["toId"])
+           or a.get("kind") == "arrow" and by_label["Queue"]["id"] in (a["fromId"], a["toId"])]
+    assert len(skot.arrows()) == before + 1, "the flow must add exactly the one typed arrow: %s" % arrows_named(els)
+    assert [(a["fromId"], a["toId"]) for a in new] == [(by_label["Worker"]["id"], by_label["Queue"]["id"])], arrows_named(els)
+    assert not overlapping_pairs(els), overlapping_pairs(els)
     evidence.note(arrows=arrows_named(els))
     assert_no_console_errors(evidence)
 

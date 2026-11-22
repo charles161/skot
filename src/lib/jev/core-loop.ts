@@ -156,6 +156,8 @@ interface Anchor {
   side: "right" | "left";
   /** Every selected node, when the anchor is a multi-selection. */
   group?: string[];
+  /** The anchor is a node with the same name: the copy goes straight under it. */
+  twin?: boolean;
 }
 
 interface Slot {
@@ -165,9 +167,10 @@ interface Slot {
 }
 
 /**
- * The first free slot around the anchor, closest first: its flow side on the same row, the rows just below
- * and above there, straight below / above the anchor, and only then further out. A run of nodes added from
- * one anchor stays around it instead of growing one tall column. A slot is free when it keeps `CLEARANCE`
+ * The first free slot around the anchor, closest first: its flow side on the same row, straight below /
+ * above the anchor, the rows just below and above on the flow side, and only then further out. A run of
+ * nodes added from one anchor stays around it instead of growing one tall column. A copy of the anchor
+ * (same name) starts straight under it. A slot is free when it keeps `CLEARANCE`
  * from every node; slots an existing arrow runs through are used only when nothing else is left.
  */
 function freeSlotBeside(anchor: Anchor, size: { width: number; height: number }, elements: JevElement[]): Slot {
@@ -187,10 +190,18 @@ function freeSlotBeside(anchor: Anchor, size: { width: number; height: number },
   const own = a.x + (a.width - size.width) / 2;
   const far = sideX(anchor.side, 2);
   const back = sideX(other, 1);
+  const first: Array<[x: number, rows: number[], adjacent?: boolean]> = anchor.twin
+    ? [
+        [own, [1, -1], true],
+        [flow, [0], true],
+      ]
+    : [
+        [flow, [0], true],
+        [own, [1, -1], true],
+      ];
   const ring: Array<[x: number, rows: number[], adjacent?: boolean]> = [
-    [flow, [0], true],
+    ...first,
     [flow, [1, -1]],
-    [own, [1, -1], true],
     [flow, [2, -2]],
     [far, [0, 1, -1]],
     [back, [0, 1, -1]],
@@ -270,6 +281,11 @@ function pickAnchor(input: TypedNodeInput, label: string, kind: ShapeKind): Anch
   }
 
   const visible = shapes.filter(inView);
+  const twins = visible.filter((s) => norm(s.label) === norm(label));
+  if (twins.length > 0) {
+    const twin = twins[twins.length - 1];
+    return { id: twin.id, rect: rectOf(twin), side: "right", twin: true };
+  }
   const focused = input.lastFocusedId ? visible.find((s) => s.id === input.lastFocusedId) ?? null : null;
   const near = focused ? getElementCenter(focused) : input.viewportCenter;
   const nearest = (pool: JevElement[]) =>
@@ -373,6 +389,8 @@ export function connectionOptions(input: ConnectionInput): PredictedAction[] {
   );
   const role = roleOf(node);
   const here = getElementCenter(node);
+  const byId = new Map(input.elements.map((e) => [e.id, e]));
+  const solid = input.elements.filter((e) => isObstacle(e) && e.kind !== "freedraw");
   const scored = others.map((other, index) => {
     const r = roleOf(other);
     const feedsNode = Boolean(r && role && NEXT_ROLES[r].includes(role));
@@ -393,6 +411,9 @@ export function connectionOptions(input: ConnectionInput): PredictedAction[] {
     .map(({ from, to }) => {
       // The catalog's own word for what flows into the target ("HTTPS", "SQL"), else a plain verb.
       const verb = componentByExactName(to.label)?.inbound ?? relationVerb(from, to);
+      // An arrow that has to pass another node is offered as a bare line: its label would sit on that node.
+      const link = makeLink(from.id, to.id, verb);
+      const crosses = arrowHitsShape(link, byId, solid, 4) !== null;
       return {
         id: uid("pred"),
         title: `${from.label || from.kind} → ${to.label || to.kind}`,
@@ -401,7 +422,7 @@ export function connectionOptions(input: ConnectionInput): PredictedAction[] {
         nodeCount: 0,
         source: "board" as const,
         feedbackKeys: ["cat:connect"],
-        addElements: [makeLink(from.id, to.id, verb)],
+        addElements: [crosses ? { ...link, label: "" } : link],
         focusId: node.id,
       };
     });

@@ -65,7 +65,8 @@ features:
 
   - id: core-loop-connections-suggested
     title: "Core loop 3: after a node is added its connection is offered as a ghost arrow, never drawn; Enter on the
-      empty bar accepts it, typing the next name skips it, and a late jev answer never moves the highlight"
+      empty bar accepts it, typing the next name skips it, a late jev answer never moves the highlight, and a typed
+      flow (worker -> queue) adds only the arrow that was typed"
     check: core-loop-connections-suggested
     sources:
       - src/components/jev/PredictionHud.tsx

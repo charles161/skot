@@ -180,9 +180,28 @@ describe("placement: free space beside the selected, related or last node", () =
     const beside = buildNextOptions({ elements: [app], text: "billing", selectedIds: ["app"], viewportCenter: CENTER })!;
     expect(beside.options[0].subtitle).toBe("new node beside App");
     expect(beside.intent.detail).toBe("beside App");
-    const near = buildNextOptions({ elements: chain, text: "billing", selectedIds: ["app"], viewportCenter: CENTER })!;
+    const below = el({ id: "b1", label: "Below", x: 100, y: 436 });
+    const above = el({ id: "b2", label: "Above", x: 100, y: 164 });
+    const near = buildNextOptions({ elements: [...chain, below, above], text: "billing", selectedIds: ["app"], viewportCenter: CENTER })!;
     expect(near.options[0].subtitle).toBe("new node near App");
     expect(near.intent.detail).toBe("near App");
+  });
+
+  // Second judge on prod, 22 Nov: "near App" pointed at a node that landed under API Gateway.
+  it("with the flow side taken, goes straight below the anchor before going diagonal", () => {
+    const { node, adjacent } = plan("billing", chain, { selectedIds: ["app"] });
+    expect(adjacent).toBe(true);
+    expect(Math.abs(node.x + node.width / 2 - (app.x + app.width / 2))).toBeLessThanOrEqual(2);
+    expect(node.y).toBeGreaterThan(app.y + app.height);
+  });
+
+  it("puts a copy straight under its twin", () => {
+    const { node, anchorId } = plan("api gateway", chain, { lastFocusedId: "pg" });
+    expect(anchorId).toBe("gw");
+    expect(Math.abs(node.x + node.width / 2 - (gateway.x + gateway.width / 2))).toBeLessThanOrEqual(2);
+    expect(node.y).toBeGreaterThan(gateway.y + gateway.height);
+    const picked = plan("api gateway", chain, { selectedIds: ["app"], lastFocusedId: "pg" });
+    expect(picked.anchorId).toBe("app");
   });
 
   it("is the same every time for the same board and text", () => {
@@ -272,6 +291,16 @@ describe("connections are offered after the node exists, never applied", () => {
       expect(new Set([link.fromId, link.toId]).has("pg3")).toBe(false);
     }
     expect(connectionOptions({ elements: [postgres, third, twin], nodeId: "new", anchorIds: ["pg"] })).toEqual([]);
+  });
+
+  // Second judge on prod, 22 Nov: a ghost arrow ran through the node in between, its label over that node's name.
+  it("offers a link that crosses another node as a bare line, without a label on top of that node", () => {
+    const far = el({ id: "new", label: "Search", x: 1000, y: 300 });
+    const options = connectionOptions({ elements: [app, gateway, postgres, far], nodeId: "new", anchorIds: ["app"] });
+    const crossing = options.find((o) => o.addElements[0].fromId === "app" || o.addElements[0].toId === "app")!;
+    expect(crossing.addElements[0].label).toBe("");
+    const beside = connectionOptions({ elements: [app, { ...far, x: 400 }], nodeId: "new", anchorIds: ["app"] });
+    expect(beside[0].addElements[0].label).not.toBe("");
   });
 
   it("gives the same order every time", () => {
@@ -377,6 +406,23 @@ describe("typing shows what Enter adds as option 1", () => {
       full: null,
     });
     expect(refined.options[0]).toBe(result.options[0]);
+  });
+
+  // Second judge on prod, 22 Nov: with App on the board, "worker -> queue" also drew App -> Worker.
+  it("a typed flow adds only the arrows that were typed, whatever is on the board", () => {
+    for (const extra of [{}, { subjectId: "app" }, { selectedIds: ["app"] }]) {
+      const result = typed("worker -> queue", [app], extra);
+      const [flow] = result.options;
+      const shapes = flow.addElements.filter((e) => e.kind !== "arrow");
+      const arrows = flow.addElements.filter((e) => e.kind === "arrow");
+      expect(shapes.map((e) => e.label)).toEqual(["Worker", "Queue"]);
+      expect(arrows).toHaveLength(1);
+      expect(arrows[0]).toMatchObject({ fromId: shapes[0].id, toId: shapes[1].id });
+      for (const shape of shapes) expect(boxesOverlap(shape, app, 16)).toBe(false);
+    }
+    const reuse = typed("app -> worker", [app]).options[0];
+    expect(reuse.addElements.filter((e) => e.kind !== "arrow").map((e) => e.label)).toEqual(["Worker"]);
+    expect(reuse.addElements.filter((e) => e.kind === "arrow")[0]).toMatchObject({ fromId: "app" });
   });
 
   it("a typed flow is drawn as typed, with the same capitals", () => {
