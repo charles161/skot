@@ -97,7 +97,7 @@ export const morphNotationSchema = z.enum([
 ]);
 
 export const morphSemanticSpecSchema = z.object({
-  summary: z.string().trim().min(1).max(160),
+  summary: z.string().trim().min(1).transform((text) => text.slice(0, 160)),
   actors: z
     .array(
       z.object({
@@ -107,7 +107,8 @@ export const morphSemanticSpecSchema = z.object({
         tone: colorToneSchema.optional(),
       })
     )
-    .max(32),
+    .max(32)
+    .default([]),
   messages: z
     .array(
       z.object({
@@ -120,7 +121,8 @@ export const morphSemanticSpecSchema = z.object({
         isReturn: z.boolean().optional(),
       })
     )
-    .max(48),
+    .max(48)
+    .default([]),
   steps: z
     .array(
       z.object({
@@ -140,7 +142,8 @@ export const morphSemanticSpecSchema = z.object({
           .optional(),
       })
     )
-    .max(40),
+    .max(40)
+    .default([]),
   states: z
     .array(
       z.object({
@@ -151,7 +154,8 @@ export const morphSemanticSpecSchema = z.object({
         tone: colorToneSchema.optional(),
       })
     )
-    .max(32),
+    .max(32)
+    .default([]),
   transitions: z
     .array(
       z.object({
@@ -164,7 +168,8 @@ export const morphSemanticSpecSchema = z.object({
         fallback: z.boolean().optional(),
       })
     )
-    .max(48),
+    .max(48)
+    .default([]),
   entities: z
     .array(
       z.object({
@@ -174,7 +179,8 @@ export const morphSemanticSpecSchema = z.object({
         tone: colorToneSchema.optional(),
       })
     )
-    .max(24),
+    .max(24)
+    .default([]),
   relations: z
     .array(
       z.object({
@@ -185,7 +191,8 @@ export const morphSemanticSpecSchema = z.object({
         label: z.string().trim().max(80).optional(),
       })
     )
-    .max(48),
+    .max(48)
+    .default([]),
   fragments: z
     .array(
       z
@@ -204,12 +211,27 @@ export const morphSemanticSpecSchema = z.object({
     .optional(),
 });
 
+/** The arrays a morph to each notation draws from; a spec for that notation must carry them. */
+export const MORPH_NOTATION_ARRAYS = {
+  sequence: ["actors", "messages"],
+  flowchart: ["steps"],
+  state: ["states", "transitions"],
+  er: ["entities", "relations"],
+} as const satisfies Record<Exclude<MorphNotation, "sketch">, ReadonlyArray<keyof MorphSemanticSpec>>;
+
+/**
+ * Arrays of the notations not being drawn default to empty: models answering a sequence morph omit states, steps
+ * and so on. With `target`, the arrays that notation draws from must be present.
+ */
 export function validateMorphSemanticSpec(
-  raw: unknown
+  raw: unknown,
+  target?: Exclude<MorphNotation, "sketch">
 ): { ok: true; spec: MorphSemanticSpec } | { ok: false; error: string } {
   if (!raw || typeof raw !== "object" || hasForbiddenObjectKeys(raw)) {
     return { ok: false, error: "Invalid or unsafe morph semantic spec" };
   }
+  const missing = target ? MORPH_NOTATION_ARRAYS[target].find((key) => !Array.isArray((raw as Record<string, unknown>)[key])) : undefined;
+  if (missing) return { ok: false, error: `A ${target} morph needs a "${missing}" array` };
   const parsed = morphSemanticSpecSchema.safeParse(raw);
   if (!parsed.success) {
     return {

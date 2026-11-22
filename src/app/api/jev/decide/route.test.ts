@@ -759,3 +759,61 @@ describe("/api/jev/decide (Blockers 7 & 8 + M1 guardrails)", () => {
     }
   });
 });
+
+describe("/api/jev/decide morph_notation on a full board", () => {
+  const savedKey = process.env.AI_GATEWAY_API_KEY;
+  beforeEach(() => {
+    resetDecideStateForTests();
+    mockResolveJevTransport.mockReturnValue(null);
+    process.env.AI_GATEWAY_API_KEY = "dummy-morph";
+  });
+  afterEach(() => {
+    if (savedKey === undefined) delete process.env.AI_GATEWAY_API_KEY;
+    else process.env.AI_GATEWAY_API_KEY = savedKey;
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  // Prod 22 Nov 2026: select-all + Sequence on the checkout starter fell back to the heuristic 10 of 10 times.
+  // Haiku answers in 4-7 s (over the old 6.5 s cap) and often omits the arrays of the other notations.
+  it("refines the 6-node checkout board to a sequence when the model returns only the sequence arrays", async () => {
+    const fixture = (await import("@/lib/jev/__fixtures__/checkout-morph-sequence.json")).default;
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ model: "anthropic/claude-haiku-5.5", choices: [{ message: { content: JSON.stringify(fixture.haikuAnswer) } }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+
+    const res = await POST(makeDecideRequest(fixture.request, "198.51.100.130"));
+    const json = (await res.json()) as { source: string; model: string; spec: Record<string, unknown[]> | null };
+
+    expect(json.source).toBe("llm-json");
+    expect(json.model).toBe("anthropic/claude-haiku-5.5");
+    expect(fixture.haikuAnswer.summary.length).toBeGreaterThan(160);
+    expect(String(json.spec?.summary).length).toBeLessThanOrEqual(160);
+    expect(json.spec?.actors).toHaveLength(6);
+    expect(json.spec?.messages).toHaveLength(5);
+    for (const key of ["steps", "states", "transitions", "entities", "relations"]) expect(json.spec?.[key]).toEqual([]);
+    expect(timeoutSpy).toHaveBeenCalledWith(10_000);
+    const sent = JSON.parse(String((fetchSpy.mock.calls[0][1] as RequestInit).body)) as { messages: Array<{ role: string; content: string }> };
+    expect(sent.messages[0].content).toContain("Fill only the arrays of targetNotation");
+  });
+
+  it("still falls back when the model omits the arrays the target notation needs", async () => {
+    const fixture = (await import("@/lib/jev/__fixtures__/checkout-morph-sequence.json")).default;
+    const { messages: _omitted, ...withoutMessages } = fixture.haikuAnswer;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ model: "m", choices: [{ message: { content: JSON.stringify(withoutMessages) } }] }), { status: 200 })
+      )
+    );
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const json = (await (await POST(makeDecideRequest(fixture.request, "198.51.100.131"))).json()) as { source: string };
+    expect(json.source).toBe("heuristic");
+  });
+});
+

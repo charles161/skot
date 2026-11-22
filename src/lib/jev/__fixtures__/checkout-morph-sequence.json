@@ -1,0 +1,621 @@
+{
+ "_note": "Captured 22 Nov 2026 from https://skot.lightslips.ai: the checkout starter, select all, morph to Sequence (request), and a real anthropic/claude-haiku-5.5 answer to it with only the sequence arrays (Haiku often omits the rest).",
+ "request": {
+  "mode": "morph_notation",
+  "targetNotation": "sequence",
+  "selectedIds": [
+   "frm_9fzyrlr",
+   "el_4u9a2ya",
+   "el_cog4j0q",
+   "el_lurrrn6",
+   "el_enf1x7p",
+   "el_jvay13n",
+   "el_5tfjxh2",
+   "arr_5c994gy",
+   "arr_cv9shem",
+   "arr_ia1pfub",
+   "arr_pi7no34",
+   "arr_k90y5si"
+  ],
+  "boardGraph": {
+   "version": 1,
+   "notation": "architecture",
+   "boardTitle": "Checkout System",
+   "stats": {
+    "totalNodes": 6,
+    "totalEdges": 5,
+    "totalGroups": 1,
+    "truncated": false
+   },
+   "nodes": [
+    {
+     "id": "el_4u9a2ya",
+     "label": "Customer",
+     "sublabel": "Checkout UI",
+     "kind": "actor",
+     "tone": "terracotta",
+     "x": 67,
+     "y": 315
+    },
+    {
+     "id": "el_cog4j0q",
+     "label": "Checkout API",
+     "sublabel": "Idempotency key",
+     "kind": "node",
+     "tone": "cobalt",
+     "x": 274,
+     "y": 331,
+     "groupId": "frm_9fzyrlr"
+    },
+    {
+     "id": "el_lurrrn6",
+     "label": "Risk Check?",
+     "sublabel": "Fraud rules",
+     "kind": "diamond",
+     "tone": "plum",
+     "x": 532,
+     "y": 319,
+     "groupId": "frm_9fzyrlr"
+    },
+    {
+     "id": "el_enf1x7p",
+     "label": "Payment Gateway",
+     "sublabel": "Stripe / PSP",
+     "kind": "external",
+     "tone": "cobalt",
+     "x": 778,
+     "y": 333,
+     "groupId": "frm_9fzyrlr"
+    },
+    {
+     "id": "el_5tfjxh2",
+     "label": "Webhook Queue",
+     "sublabel": "Async receipts",
+     "kind": "queue",
+     "tone": "ochre",
+     "x": 1038,
+     "y": 397
+    },
+    {
+     "id": "el_jvay13n",
+     "label": "Ledger DB",
+     "sublabel": "Double-entry SQL",
+     "kind": "database",
+     "tone": "teal",
+     "x": 1048,
+     "y": 262
+    }
+   ],
+   "edges": [
+    {
+     "id": "arr_5c994gy",
+     "from": "el_4u9a2ya",
+     "to": "el_cog4j0q",
+     "label": "pay"
+    },
+    {
+     "id": "arr_cv9shem",
+     "from": "el_cog4j0q",
+     "to": "el_lurrrn6",
+     "label": "score"
+    },
+    {
+     "id": "arr_ia1pfub",
+     "from": "el_lurrrn6",
+     "to": "el_enf1x7p",
+     "label": "Approved"
+    },
+    {
+     "id": "arr_pi7no34",
+     "from": "el_enf1x7p",
+     "to": "el_jvay13n",
+     "label": "settle"
+    },
+    {
+     "id": "arr_k90y5si",
+     "from": "el_enf1x7p",
+     "to": "el_5tfjxh2",
+     "label": "events",
+     "dashed": true
+    }
+   ],
+   "groups": [
+    {
+     "id": "frm_9fzyrlr",
+     "label": "Payment Core",
+     "nodeIds": [
+      "el_cog4j0q",
+      "el_lurrrn6",
+      "el_enf1x7p"
+     ]
+    }
+   ],
+   "selectedIds": [
+    "frm_9fzyrlr",
+    "el_4u9a2ya",
+    "el_cog4j0q",
+    "el_lurrrn6",
+    "el_enf1x7p",
+    "el_jvay13n",
+    "el_5tfjxh2",
+    "arr_5c994gy",
+    "arr_cv9shem",
+    "arr_ia1pfub",
+    "arr_pi7no34",
+    "arr_k90y5si"
+   ],
+   "recentDeltas": [
+    {
+     "op": "prompt",
+     "summary": "Drew \"Checkout system with payment gateway, fraud check, and ledge\"",
+     "elementIds": [
+      "frm_9fzyrlr",
+      "el_4u9a2ya",
+      "el_cog4j0q",
+      "el_lurrrn6",
+      "el_enf1x7p",
+      "el_jvay13n",
+      "el_5tfjxh2",
+      "arr_5c994gy"
+     ]
+    },
+    {
+     "op": "update",
+     "summary": "Morphed to Sequence",
+     "elementIds": [
+      "mseq_3abpels",
+      "mseq_cu0pybz",
+      "mseq_a5iktii",
+      "mseq_7fmsrhh",
+      "mseq_6yqxdfw",
+      "mseq_l2ks200"
+     ]
+    }
+   ],
+   "canonicalHash": "52e9ebd0e4d4c243"
+  },
+  "currentSpec": {
+   "summary": "Customer \u2192 Ledger DB",
+   "actors": [
+    {
+     "id": "sem_0",
+     "label": "Customer",
+     "kind": "actor",
+     "tone": "terracotta"
+    },
+    {
+     "id": "sem_1",
+     "label": "Checkout API",
+     "kind": "node",
+     "tone": "cobalt"
+    },
+    {
+     "id": "sem_2",
+     "label": "Risk Check?",
+     "kind": "diamond",
+     "tone": "plum"
+    },
+    {
+     "id": "sem_3",
+     "label": "Payment Gateway",
+     "kind": "external",
+     "tone": "cobalt"
+    },
+    {
+     "id": "sem_4",
+     "label": "Webhook Queue",
+     "kind": "queue",
+     "tone": "ochre"
+    },
+    {
+     "id": "sem_5",
+     "label": "Ledger DB",
+     "kind": "database",
+     "tone": "teal"
+    }
+   ],
+   "messages": [
+    {
+     "id": "msg_1",
+     "order": 1,
+     "from": "sem_0",
+     "to": "sem_1",
+     "label": "pay"
+    },
+    {
+     "id": "msg_2",
+     "order": 2,
+     "from": "sem_1",
+     "to": "sem_2",
+     "label": "score"
+    },
+    {
+     "id": "msg_3",
+     "order": 3,
+     "from": "sem_2",
+     "to": "sem_3",
+     "label": "Approved"
+    },
+    {
+     "id": "msg_4",
+     "order": 4,
+     "from": "sem_3",
+     "to": "sem_5",
+     "label": "settle"
+    },
+    {
+     "id": "msg_5",
+     "order": 5,
+     "from": "sem_3",
+     "to": "sem_4",
+     "label": "events",
+     "async": true
+    }
+   ],
+   "steps": [
+    {
+     "id": "flow_start",
+     "label": "Start",
+     "kind": "start",
+     "tone": "teal",
+     "branches": [
+      {
+       "to": "sem_0"
+      }
+     ]
+    },
+    {
+     "id": "sem_0",
+     "label": "Customer",
+     "kind": "process",
+     "tone": "terracotta",
+     "branches": [
+      {
+       "to": "sem_1",
+       "label": "pay",
+       "fallback": false
+      }
+     ]
+    },
+    {
+     "id": "sem_1",
+     "label": "Checkout API",
+     "kind": "process",
+     "tone": "cobalt",
+     "branches": [
+      {
+       "to": "sem_2",
+       "label": "score",
+       "fallback": false
+      }
+     ]
+    },
+    {
+     "id": "sem_2",
+     "label": "Risk Check?",
+     "kind": "decision",
+     "tone": "plum",
+     "branches": [
+      {
+       "to": "sem_3",
+       "label": "Approved",
+       "fallback": false
+      },
+      {
+       "to": "flow_retry_2",
+       "label": "No",
+       "fallback": true
+      }
+     ]
+    },
+    {
+     "id": "flow_retry_2",
+     "label": "Handle Error",
+     "kind": "process",
+     "tone": "terracotta",
+     "branches": [
+      {
+       "to": "flow_end",
+       "label": "abort",
+       "fallback": true
+      }
+     ]
+    },
+    {
+     "id": "sem_3",
+     "label": "Payment Gateway",
+     "kind": "decision",
+     "tone": "plum",
+     "branches": [
+      {
+       "to": "sem_5",
+       "label": "settle",
+       "fallback": false
+      },
+      {
+       "to": "sem_4",
+       "label": "events",
+       "fallback": true
+      }
+     ]
+    },
+    {
+     "id": "sem_4",
+     "label": "Webhook Queue",
+     "kind": "process",
+     "tone": "ochre",
+     "branches": [
+      {
+       "to": "sem_5"
+      }
+     ]
+    },
+    {
+     "id": "sem_5",
+     "label": "Ledger DB",
+     "kind": "process",
+     "tone": "teal",
+     "branches": [
+      {
+       "to": "flow_end"
+      }
+     ]
+    },
+    {
+     "id": "flow_end",
+     "label": "Done",
+     "kind": "end",
+     "tone": "slate"
+    }
+   ],
+   "states": [
+    {
+     "id": "sem_0",
+     "label": "Customer",
+     "initial": true,
+     "terminal": false,
+     "tone": "terracotta"
+    },
+    {
+     "id": "sem_1",
+     "label": "Checkout API",
+     "initial": false,
+     "terminal": false,
+     "tone": "cobalt"
+    },
+    {
+     "id": "sem_2",
+     "label": "Risk Check",
+     "initial": false,
+     "terminal": false,
+     "tone": "plum"
+    },
+    {
+     "id": "sem_3",
+     "label": "Payment Gateway",
+     "initial": false,
+     "terminal": false,
+     "tone": "cobalt"
+    },
+    {
+     "id": "sem_4",
+     "label": "Webhook Queue",
+     "initial": false,
+     "terminal": false,
+     "tone": "ochre"
+    },
+    {
+     "id": "sem_5",
+     "label": "Ledger DB",
+     "initial": false,
+     "terminal": true,
+     "tone": "teal"
+    }
+   ],
+   "transitions": [
+    {
+     "id": "tr_1",
+     "from": "sem_0",
+     "to": "sem_1",
+     "event": "pay"
+    },
+    {
+     "id": "tr_2",
+     "from": "sem_1",
+     "to": "sem_2",
+     "event": "score"
+    },
+    {
+     "id": "tr_3",
+     "from": "sem_2",
+     "to": "sem_3",
+     "event": "Approved"
+    },
+    {
+     "id": "tr_4",
+     "from": "sem_3",
+     "to": "sem_5",
+     "event": "settle"
+    },
+    {
+     "id": "tr_5",
+     "from": "sem_3",
+     "to": "sem_4",
+     "event": "events",
+     "fallback": true
+    }
+   ],
+   "entities": [
+    {
+     "id": "sem_0",
+     "name": "Customer",
+     "attributes": [
+      "id uuid PK",
+      "email text UK",
+      "role text",
+      "created_at timestamptz"
+     ],
+     "tone": "terracotta"
+    },
+    {
+     "id": "sem_1",
+     "name": "Checkout",
+     "attributes": [
+      "id uuid PK",
+      "status text",
+      "amount_cents int",
+      "created_at timestamptz",
+      "customer_id uuid FK UK"
+     ],
+     "tone": "cobalt"
+    },
+    {
+     "id": "sem_3",
+     "name": "Payment",
+     "attributes": [
+      "id uuid PK",
+      "status text",
+      "amount_cents int",
+      "created_at timestamptz",
+      "checkout_id uuid FK UK"
+     ],
+     "tone": "cobalt"
+    },
+    {
+     "id": "sem_4",
+     "name": "Webhook",
+     "attributes": [
+      "id uuid PK",
+      "topic text",
+      "payload jsonb",
+      "processed_at timestamptz",
+      "payment_id uuid FK"
+     ],
+     "tone": "ochre"
+    },
+    {
+     "id": "sem_5",
+     "name": "Ledger",
+     "attributes": [
+      "id uuid PK",
+      "status text",
+      "amount_cents int",
+      "created_at timestamptz",
+      "payment_id uuid FK"
+     ],
+     "tone": "teal"
+    }
+   ],
+   "relations": [
+    {
+     "id": "rel_1",
+     "from": "sem_0",
+     "to": "sem_1",
+     "cardinality": "1:1",
+     "label": "pay"
+    },
+    {
+     "id": "rel_2",
+     "from": "sem_1",
+     "to": "sem_3",
+     "cardinality": "1:1",
+     "label": "score"
+    },
+    {
+     "id": "rel_3",
+     "from": "sem_3",
+     "to": "sem_5",
+     "cardinality": "1:N",
+     "label": "settle"
+    },
+    {
+     "id": "rel_4",
+     "from": "sem_3",
+     "to": "sem_4",
+     "cardinality": "1:N",
+     "label": "events"
+    }
+   ]
+  }
+ },
+ "haikuAnswer": {
+  "summary": "Checkout flow: Customer pays via Checkout API, fraud risk check, approved payments go to Payment Gateway, which settles to Ledger DB and emits async webhook events.",
+  "actors": [
+   {
+    "id": "el_4u9a2ya",
+    "label": "Customer",
+    "kind": "actor",
+    "tone": "terracotta"
+   },
+   {
+    "id": "el_cog4j0q",
+    "label": "Checkout API",
+    "kind": "node",
+    "tone": "cobalt"
+   },
+   {
+    "id": "el_lurrrn6",
+    "label": "Risk Check?",
+    "kind": "node",
+    "tone": "plum"
+   },
+   {
+    "id": "el_enf1x7p",
+    "label": "Payment Gateway",
+    "kind": "external",
+    "tone": "cobalt"
+   },
+   {
+    "id": "el_5tfjxh2",
+    "label": "Webhook Queue",
+    "kind": "queue",
+    "tone": "ochre"
+   },
+   {
+    "id": "el_jvay13n",
+    "label": "Ledger DB",
+    "kind": "database",
+    "tone": "teal"
+   }
+  ],
+  "messages": [
+   {
+    "id": "arr_5c994gy",
+    "from": "el_4u9a2ya",
+    "to": "el_cog4j0q",
+    "label": "pay",
+    "order": 1
+   },
+   {
+    "id": "arr_cv9shem",
+    "from": "el_cog4j0q",
+    "to": "el_lurrrn6",
+    "label": "score",
+    "order": 2
+   },
+   {
+    "id": "arr_ia1pfub",
+    "from": "el_lurrrn6",
+    "to": "el_enf1x7p",
+    "label": "Approved",
+    "order": 3
+   },
+   {
+    "id": "arr_pi7no34",
+    "from": "el_enf1x7p",
+    "to": "el_jvay13n",
+    "label": "settle",
+    "order": 4
+   },
+   {
+    "id": "arr_k90y5si",
+    "from": "el_enf1x7p",
+    "to": "el_5tfjxh2",
+    "label": "events",
+    "order": 5,
+    "async": true
+   }
+  ],
+  "fragments": []
+ }
+}

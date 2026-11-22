@@ -54,6 +54,8 @@ export type LlmRoute = keyof typeof LLM_ROUTE_MODELS;
 const LLM_TIMEOUT_MS = 6500;
 /** Three full graphs with trade-offs take gpt-4.1-mini ~8-15 s through the gateway. */
 const FORK_TIMEOUT_MS = 25000;
+/** A full-board morph is 700-1000 output tokens: Haiku takes 4-7 s through the gateway. */
+export const MORPH_TIMEOUT_MS = 10000;
 
 const KIND_UNION = SEMANTIC_NODE_KINDS.map((k) => `"${k}"`).join("|");
 const END_UNION = ARROW_ENDS.map((e) => `"${e}"`).join("|");
@@ -363,8 +365,9 @@ export async function generateMorphSpecWithLlm(params: {
   const result = await requestStructuredJsonFromLlm({
     auth: params.auth,
     route: "morph",
+    timeoutMs: MORPH_TIMEOUT_MS,
     systemPrompt:
-      'Return ONLY valid JSON matching {"summary":string,"actors":[{"id":string,"label":string,"kind"?:"node"|"database"|"queue"|"cache"|"lb"|"blob"|"external"|"actor"|"class"|"ellipse","tone"?:"ink"|"terracotta"|"cobalt"|"teal"|"ochre"|"plum"|"slate"}],"messages":[{"id":string,"from":string,"to":string,"label":string,"order":number,"async"?:boolean,"isReturn"?:boolean}],"fragments"?:[{"id":string,"operator":"alt"|"loop"|"opt","guard":string,"fromOrder":number,"toOrder":number,"elseFromOrder"?:number,"elseGuard"?:string}],"steps":[{"id":string,"label":string,"kind":"start"|"process"|"decision"|"end","tone"?:string,"branches"?:[{"to":string,"label"?:string,"fallback"?:boolean}]}],"states":[{"id":string,"label":string,"initial"?:boolean,"terminal"?:boolean,"tone"?:string}],"transitions":[{"id":string,"from":string,"to":string,"event":string,"guard"?:string,"action"?:string,"fallback"?:boolean}],"entities":[{"id":string,"name":string,"attributes":string[],"tone"?:string}],"relations":[{"id":string,"from":string,"to":string,"cardinality":string,"label"?:string}]}. UML rules: messages are exactly the arrows drawn between selected nodes, one message per arrow; never add a message, a return or a participant that is not drawn (isReturn only marks a drawn arrow back to its caller); fragments cover message orders fromOrder..toOrder (only alt sets elseFromOrder/elseGuard, inside that range); transition guard is the condition without brackets, action is the effect; entity attributes are rows like "id uuid PK" and "user_id uuid FK"; cardinality is "1:1", "1:N", "N:1" or "N:M". Keep semantic IDs aligned with the selected nodes so round-tripping preserves edits.',
+      'Return ONLY valid JSON matching {"summary":string (under 120 characters),"actors":[{"id":string,"label":string,"kind"?:"node"|"database"|"queue"|"cache"|"lb"|"blob"|"external"|"actor"|"class"|"ellipse","tone"?:"ink"|"terracotta"|"cobalt"|"teal"|"ochre"|"plum"|"slate"}],"messages":[{"id":string,"from":string,"to":string,"label":string,"order":number,"async"?:boolean,"isReturn"?:boolean}],"fragments"?:[{"id":string,"operator":"alt"|"loop"|"opt","guard":string,"fromOrder":number,"toOrder":number,"elseFromOrder"?:number,"elseGuard"?:string}],"steps":[{"id":string,"label":string,"kind":"start"|"process"|"decision"|"end","tone"?:string,"branches"?:[{"to":string,"label"?:string,"fallback"?:boolean}]}],"states":[{"id":string,"label":string,"initial"?:boolean,"terminal"?:boolean,"tone"?:string}],"transitions":[{"id":string,"from":string,"to":string,"event":string,"guard"?:string,"action"?:string,"fallback"?:boolean}],"entities":[{"id":string,"name":string,"attributes":string[],"tone"?:string}],"relations":[{"id":string,"from":string,"to":string,"cardinality":string,"label"?:string}]}. UML rules: messages are exactly the arrows drawn between selected nodes, one message per arrow; never add a message, a return or a participant that is not drawn (isReturn only marks a drawn arrow back to its caller); fragments cover message orders fromOrder..toOrder (only alt sets elseFromOrder/elseGuard, inside that range); transition guard is the condition without brackets, action is the effect; entity attributes are rows like "id uuid PK" and "user_id uuid FK"; cardinality is "1:1", "1:N", "N:1" or "N:M". Keep semantic IDs aligned with the selected nodes so round-tripping preserves edits. Fill only the arrays of targetNotation (sequence: actors, messages, fragments; flowchart: steps; state: states, transitions; er: entities, relations) and omit the others.',
     userPayload: {
       task: "morph_notation",
       targetNotation: params.targetNotation,
@@ -387,7 +390,7 @@ export async function generateMorphSpecWithLlm(params: {
     return null;
   }
 
-  const validated = validateMorphSemanticSpec(decoded);
+  const validated = validateMorphSemanticSpec(decoded, params.targetNotation === "sketch" ? undefined : params.targetNotation);
   if (!validated.ok) {
     logServerEvent("warn", {
       route: "ai-gateway",

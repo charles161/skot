@@ -1228,3 +1228,30 @@ describe("Morph to sequence morphs only the selected flow (SD Sensei URL-shorten
     });
   });
 });
+
+describe("validateMorphSemanticSpec: arrays per target notation", () => {
+  const sequenceOnly = {
+    summary: "Pay",
+    actors: [
+      { id: "a", label: "API" },
+      { id: "b", label: "DB", kind: "database" },
+    ],
+    messages: [{ id: "m1", from: "a", to: "b", label: "insert", order: 1 }],
+  };
+
+  it("defaults the arrays of the other notations to empty", () => {
+    const v = validateMorphSemanticSpec(sequenceOnly, "sequence");
+    expect(v.ok && [v.spec.steps, v.spec.states, v.spec.transitions, v.spec.entities, v.spec.relations]).toEqual([[], [], [], [], []]);
+  });
+
+  it("requires the arrays the target notation draws from", () => {
+    expect(validateMorphSemanticSpec(sequenceOnly, "state")).toEqual({ ok: false, error: 'A state morph needs a "states" array' });
+    const { messages: _m, ...noMessages } = sequenceOnly;
+    expect(validateMorphSemanticSpec(noMessages, "sequence")).toEqual({ ok: false, error: 'A sequence morph needs a "messages" array' });
+  });
+
+  it("cuts an over-long summary instead of rejecting the spec", () => {
+    const v = validateMorphSemanticSpec({ ...sequenceOnly, summary: "x".repeat(200) }, "sequence");
+    expect(v.ok && v.spec.summary).toBe("x".repeat(160));
+  });
+});
