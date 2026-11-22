@@ -279,15 +279,28 @@ def loop_result(page, skot, settle_ms):
             "arrows": arrows_named(els)}
 
 
+def panel_after_one_more(page):
+    """Add one more node and read the suggestion panel once the AI has had time to answer (or fail)."""
+    type_enter(page, "redis")
+    page.wait_for_timeout(1500)
+    return page.locator('[role=region][aria-label="Predictive drafting suggestions"]').inner_text().replace("\n", " ")
+
+
 @check("core-loop-ai-optional")
 def test_core_loop_ai_optional(page, skot, new_page, evidence, base_url, ai):
-    results = {}
+    results, panels = {}, {}
     for mode, settle in (("ok", 900), ("fail", 0), ("hang", 0), ("ok-fast", 0)):
         p = new_page(mode)
         ai(p, mode.split("-")[0])
         results[mode] = loop_result(p, Driver(p, base_url), settle)
         shot(p, evidence, "core-loop-ai-optional", mode)
+        if mode in ("ok", "fail"):
+            panels[mode] = panel_after_one_more(p)
+            shot(p, evidence, "core-loop-ai-optional", mode + "-panel")
     evidence.note(**results)
+    # Judge on prod, 22 Nov: with the AI returning 500 the panel said "jev deciding…" for ever.
+    assert "deciding" not in panels["fail"], "the panel still says deciding after the AI failed: %r" % panels["fail"][:200]
+    assert "scored by jev" in panels["ok"] and "jev pick" in panels["ok"], "jev's score should show when it answers: %r" % panels["ok"][:200]
     first = results["ok"]
     assert len(first["nodes"]) == 4 and len(first["arrows"]) == 1, first
     for mode, got in results.items():

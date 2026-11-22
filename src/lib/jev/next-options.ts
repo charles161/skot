@@ -28,6 +28,7 @@ import {
   kindForLabel,
   makeLink,
   makeShape,
+  placedWhere,
   planTypedNode,
   sizeFor,
   typedNodeLabel,
@@ -345,7 +346,12 @@ export function predictConcept(text: string, elements: JevElement[], anchor?: Je
         : concept.type === "literal"
           ? concept.label
           : text.trim();
-  const completes = (concept.type === "component" || concept.type === "system") && norm(text) !== norm(label);
+  // Tab only finishes the word being typed ("api" to "API Gateway"); it never swaps it for another name
+  // ("kaf" to "Event Bus").
+  const completes =
+    (concept.type === "component" || concept.type === "system") &&
+    norm(text) !== norm(label) &&
+    norm(label).startsWith(norm(text));
   return { label, ...(completes ? { completion: label } : {}) };
 }
 
@@ -1325,12 +1331,11 @@ export function buildNextOptions(input: NextOptionsInput): NextOptionsResult | n
     conceptLabel,
     selectedIds: input.selectedIds ?? [],
   };
-  const beside = plan?.anchorId ? elements.find((e) => e.id === plan.anchorId)?.label : "";
-  const typedIntent: SpatialIntent | null = typed
+  const typedIntent: SpatialIntent | null = typed && plan
     ? {
         kind: "prompt_follow_up",
         headline: `Enter adds ${typed.title}`,
-        detail: beside ? `beside ${beside}` : "a new node",
+        detail: placedWhere(plan, elements) || "a new node",
         subjectId: plan?.anchorId ?? undefined,
         relatedIds: [],
         timestamp: Date.now(),

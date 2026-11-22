@@ -29,6 +29,16 @@ describe("the key legend says what Enter and Tab will do", () => {
     expect(legend(html)).toBe("Enter ↵ connect · Tab next option · Esc dismiss");
     expect(text(html)).toMatch(/Connect or grow/);
   });
+  // Judge on prod, 22 Nov: the chip said "ranked by jev" while jev's pick sat second.
+  it("says jev scored the options, not that it ranked them: the order is the board's", () => {
+    const scored = [node("a"), { ...node("b"), probability: 0.63 }, node("c")];
+    const telemetry = { source: "gateway:typesafe-ai/jev" as const, model: "typesafe-ai/jev", isHeuristic: false, latencyMs: 90, evaluating: false };
+    const t = text(renderToStaticMarkup(<PredictionHud {...base} predictions={scored} telemetry={telemetry} />));
+    expect(t).toMatch(/scored by jev/);
+    expect(t).not.toMatch(/ranked by jev/);
+    expect(t).toMatch(/jev pick 63%/);
+  });
+
   it("never shows where an option came from (lexicon, template, LLM)", () => {
     const sourced = { ...node("a"), source: "lexicon" as const };
     expect(text(renderToStaticMarkup(<PredictionHud {...typed} predictions={[sourced, node("b"), node("c")]} />))).not.toMatch(/lexicon|template|LLM/);

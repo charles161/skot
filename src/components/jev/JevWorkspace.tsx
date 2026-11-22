@@ -570,7 +570,12 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
             category: c.category,
           })),
         }, { aiQuiet: aiQuietRef.current, signal: controller.signal });
-        if (!res || !res.ok || controller.signal.aborted) return;
+        if (controller.signal.aborted) return;
+        if (!res || !res.ok) {
+          // The AI is down or said no: the options on screen stand as they are, and "deciding" must end.
+          setTelemetry((prev) => (prev ? { ...prev, evaluating: false } : null));
+          return;
+        }
         const data = (await res.json()) as {
           source: DecideSource;
           model: string;

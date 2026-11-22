@@ -72,7 +72,8 @@ features:
       - src/components/jev/JevWorkspace.tsx
 
   - id: core-loop-ai-optional
-    title: "Core loop 4: the same keys on the same board give the same board whether the AI answers, fails or hangs"
+    title: "Core loop 4: the same keys on the same board give the same board whether the AI answers, fails or hangs;
+      the panel shows jev's score when it answers and stops saying deciding when it fails"
     check: core-loop-ai-optional
     sources:
       - src/components/jev/JevWorkspace.tsx

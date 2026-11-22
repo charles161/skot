@@ -128,7 +128,7 @@ export function PredictionHud({
                   }`}
                 >
                   <IconCpu className="h-2.5 w-2.5" aria-hidden="true" />
-                  {telemetry?.evaluating ? "jev deciding…" : "ranked by jev"}
+                  {telemetry?.evaluating ? "jev deciding…" : "scored by jev"}
                 </span>
               )}
             </div>
@@ -215,7 +215,7 @@ export function PredictionHud({
                                 : "text-muted-foreground"
                             }`}
                           >
-                            jev {pct}%
+                            jev pick {pct}%
                           </span>
                         )}
                       </div>

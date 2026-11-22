@@ -3,7 +3,7 @@
 // still added it, we should still add it in the best possible space possible."
 import { describe, expect, it } from "vitest";
 import { connectionOptions, isFlowText, planTypedNode, typedNodeLabel } from "@/lib/jev/core-loop";
-import { buildAfterCreateOptions, buildNextOptions, refineOptionsWithGraphs } from "@/lib/jev/next-options";
+import { buildAfterCreateOptions, buildNextOptions, predictConcept, refineOptionsWithGraphs } from "@/lib/jev/next-options";
 import type { JevElement, ShapeKind } from "@/lib/jev/types";
 
 const el = (o: Partial<JevElement> & { id: string; label: string }): JevElement => ({
@@ -155,6 +155,36 @@ describe("placement: free space beside the selected, related or last node", () =
     expect(node.x).toBeGreaterThan(5000);
   });
 
+  // Judge on prod, 22 Nov: with API Gateway selected, six new nodes piled into one tall column around Postgres.
+  it("keeps a run of nodes around the selected node instead of one tall column", () => {
+    let board: JevElement[] = [...chain];
+    const added: JevElement[] = [];
+    for (const name of ["auth", "queue", "worker", "billing", "search", "mailer"]) {
+      const { node } = plan(name, board, { selectedIds: ["gw"] });
+      added.push(node);
+      board = [...board, node];
+    }
+    const centre = gateway.y + gateway.height / 2;
+    const rows = added.map((n) => Math.abs(n.y + n.height / 2 - centre));
+    expect(Math.max(...rows)).toBeLessThanOrEqual(2 * (86 + 56));
+    expect(added.filter((n) => Math.abs(n.x - gateway.x) < 60).length).toBeGreaterThanOrEqual(2);
+    for (let i = 0; i < added.length; i++) {
+      for (const other of [...chain.filter((e) => e.kind !== "arrow"), ...added.slice(0, i)]) {
+        expect(boxesOverlap(added[i], other, 16)).toBe(false);
+      }
+    }
+  });
+
+  // Judge on prod, 22 Nov: the preview said "beside App" while the node went under API Gateway.
+  it("says beside only for the slot right next to the anchor, near otherwise", () => {
+    const beside = buildNextOptions({ elements: [app], text: "billing", selectedIds: ["app"], viewportCenter: CENTER })!;
+    expect(beside.options[0].subtitle).toBe("new node beside App");
+    expect(beside.intent.detail).toBe("beside App");
+    const near = buildNextOptions({ elements: chain, text: "billing", selectedIds: ["app"], viewportCenter: CENTER })!;
+    expect(near.options[0].subtitle).toBe("new node near App");
+    expect(near.intent.detail).toBe("near App");
+  });
+
   it("is the same every time for the same board and text", () => {
     const a = plan("redis", chain, { lastFocusedId: "pg" }).node;
     const b = plan("redis", chain, { lastFocusedId: "pg" }).node;
@@ -231,6 +261,19 @@ describe("connections are offered after the node exists, never applied", () => {
     expect(first.addElements[0].label).toBe("SQL");
   });
 
+  // Judge on prod, 22 Nov: with three Postgres nodes the top two suggestions were both "Postgres → Postgres".
+  it("never offers a link between two nodes with the same name", () => {
+    const twin = el({ id: "new", label: "Postgres", kind: "database", x: 700, y: 500, width: 156, height: 86 });
+    const third = el({ id: "pg3", label: "postgres", kind: "database", x: 950, y: 500, width: 156, height: 86 });
+    const options = connectionOptions({ elements: [app, gateway, postgres, third, twin], nodeId: "new", anchorIds: ["pg"] });
+    for (const o of options) {
+      const [link] = o.addElements;
+      expect(new Set([link.fromId, link.toId]).has("pg")).toBe(false);
+      expect(new Set([link.fromId, link.toId]).has("pg3")).toBe(false);
+    }
+    expect(connectionOptions({ elements: [postgres, third, twin], nodeId: "new", anchorIds: ["pg"] })).toEqual([]);
+  });
+
   it("gives the same order every time", () => {
     const node = fresh("Redis", "cache", 700, 500);
     const titles = () => connectionOptions({ elements: [...chain, node], nodeId: "new", anchorIds: ["pg"] }).map((o) => o.title);
@@ -305,6 +348,18 @@ describe("typing shows what Enter adds as option 1", () => {
     for (const o of result.options.slice(1)) {
       expect(o.addElements.some((e) => e.id === result.typed!.node.id)).toBe(false);
     }
+  });
+
+  // Judge on prod, 22 Nov: Tab turned "kaf" into Event Bus and "app" into Client App.
+  it("Tab completes only to a name that starts with what was typed", () => {
+    const completion = (text: string) => predictConcept(text, [], null)?.completion;
+    expect(completion("api")).toBe("API Gateway");
+    expect(completion("post")).toBe("Postgres DB");
+    expect(completion("red")).toBe("Redis Cache");
+    expect(completion("kaf")).toBeUndefined();
+    expect(completion("app")).toBeUndefined();
+    expect(completion("db")).toBeUndefined();
+    expect(completion("api gateway")).toBeUndefined();
   });
 
   it("keeps bigger options bigger", () => {

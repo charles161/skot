@@ -136,8 +136,6 @@ function typedNodeKind(label: string): ShapeKind {
 const H_GAP = 128;
 const V_GAP = 56;
 const CLEARANCE = 24;
-const ROWS = [0, 1, -1, 2, -2, 3, -3];
-const NEAR_ROWS = [0, 1, -1, 2, -2];
 
 const isObstacle = (e: JevElement) => (isShapeElement(e) || e.kind === "freedraw") && !isContainerKind(e.kind) && e.kind !== "arrow";
 
@@ -160,12 +158,19 @@ interface Anchor {
   group?: string[];
 }
 
+interface Slot {
+  at: Point;
+  /** Right next to the anchor (its flow side on the same row, or straight below / above it). */
+  adjacent: boolean;
+}
+
 /**
- * The first free slot beside the anchor: its flow side first (same row, then the rows below and above), then
- * straight below / above it, then one column further, then the other side. A slot is free when it keeps
- * `CLEARANCE` from every node; slots an existing arrow runs through are used only when nothing else is left.
+ * The first free slot around the anchor, closest first: its flow side on the same row, the rows just below
+ * and above there, straight below / above the anchor, and only then further out. A run of nodes added from
+ * one anchor stays around it instead of growing one tall column. A slot is free when it keeps `CLEARANCE`
+ * from every node; slots an existing arrow runs through are used only when nothing else is left.
  */
-function freeSlotBeside(anchor: Anchor, size: { width: number; height: number }, elements: JevElement[]): Point {
+function freeSlotBeside(anchor: Anchor, size: { width: number; height: number }, elements: JevElement[]): Slot {
   const obstacles = elements.filter(isObstacle).map(obstacleRect);
   const byId = new Map(elements.map((e) => [e.id, e]));
   const arrows = elements.filter((e) => e.kind === "arrow" && e.fromId && e.toId && byId.has(e.fromId) && byId.has(e.toId));
@@ -178,23 +183,34 @@ function freeSlotBeside(anchor: Anchor, size: { width: number; height: number },
       : a.x - col * (size.width + H_GAP);
   const other = anchor.side === "right" ? "left" : "right";
   const at = (x: number, row: number): Point => ({ x: Math.round(x), y: Math.round(cy + row * pitch - size.height / 2) });
-  const slots: Point[] = [
-    ...ROWS.map((r) => at(sideX(anchor.side, 1), r)),
-    ...[1, -1, 2, -2].map((r) => at(a.x + (a.width - size.width) / 2, r)),
-    ...NEAR_ROWS.map((r) => at(sideX(anchor.side, 2), r)),
-    ...NEAR_ROWS.map((r) => at(sideX(other, 1), r)),
+  const flow = sideX(anchor.side, 1);
+  const own = a.x + (a.width - size.width) / 2;
+  const far = sideX(anchor.side, 2);
+  const back = sideX(other, 1);
+  const ring: Array<[x: number, rows: number[], adjacent?: boolean]> = [
+    [flow, [0], true],
+    [flow, [1, -1]],
+    [own, [1, -1], true],
+    [flow, [2, -2]],
+    [far, [0, 1, -1]],
+    [back, [0, 1, -1]],
+    [own, [2, -2]],
+    [flow, [3, -3]],
+    [far, [2, -2]],
+    [back, [2, -2]],
   ];
+  const slots: Slot[] = ring.flatMap(([x, rows, adjacent]) => rows.map((r) => ({ at: at(x, r), adjacent: Boolean(adjacent) })));
   const clear = (p: Point) => !obstacles.some((o) => rectsOverlap({ ...p, ...size }, o, CLEARANCE));
   const offArrows = (p: Point) => {
     const probe = { id: "__slot__", kind: "node", x: p.x, y: p.y, width: size.width, height: size.height } as JevElement;
     return !arrows.some((arrow) => arrowHitsShape(arrow, byId, [probe], 8));
   };
-  const free = slots.filter(clear);
-  const best = free.find(offArrows) ?? free[0];
+  const free = slots.filter((slot) => clear(slot.at));
+  const best = free.find((slot) => offArrows(slot.at)) ?? free[0];
   if (best) return best;
   // A crowded corner: past everything on the board, level with the anchor. Free by construction.
   const right = Math.max(...obstacles.map((o) => o.x + o.width));
-  return at(right + H_GAP, 0);
+  return { at: at(right + H_GAP, 0), adjacent: false };
 }
 
 function freeSpotAround(center: Point, size: { width: number; height: number }, elements: JevElement[]): Point {
@@ -202,7 +218,7 @@ function freeSpotAround(center: Point, size: { width: number; height: number }, 
   const obstacles = elements.filter(isObstacle).map(obstacleRect);
   const centred = { x: Math.round(center.x - size.width / 2), y: Math.round(center.y - size.height / 2) };
   if (!obstacles.some((o) => rectsOverlap({ ...centred, ...size }, o, CLEARANCE))) return centred;
-  return freeSlotBeside({ id: "", rect: origin, side: "right" }, size, elements);
+  return freeSlotBeside({ id: "", rect: origin, side: "right" }, size, elements).at;
 }
 
 export interface TypedNodeInput {
@@ -223,6 +239,8 @@ export interface TypedNodePlan {
   anchorId: string | null;
   /** The nodes a connection is offered to first: the anchor, or every node of a multi-selection. */
   anchorIds: string[];
+  /** The node sits right next to its anchor ("beside"); false when that slot was taken ("near"). */
+  adjacent: boolean;
 }
 
 function pickAnchor(input: TypedNodeInput, label: string, kind: ShapeKind): Anchor | null {
@@ -291,21 +309,30 @@ export function planTypedNode(input: TypedNodeInput): TypedNodePlan | null {
   const size = sizeFor(kind);
   const named = CATALOG.find((c) => norm(c.label) === norm(label));
   const anchor = pickAnchor(input, label, kind);
-  const at = anchor ? freeSlotBeside(anchor, size, input.elements) : freeSpotAround(input.viewportCenter, size, input.elements);
+  const slot = anchor
+    ? freeSlotBeside(anchor, size, input.elements)
+    : { at: freeSpotAround(input.viewportCenter, size, input.elements), adjacent: false };
   return {
-    node: makeShape(kind, label, named?.sublabel, at),
+    node: makeShape(kind, label, named?.sublabel, slot.at),
     anchorId: anchor?.id ?? null,
     anchorIds: anchor ? anchor.group ?? [anchor.id] : [],
+    adjacent: slot.adjacent,
   };
+}
+
+/** "beside App" when the node sits right next to its anchor, "near App" when that slot was taken, "" with no anchor. */
+export function placedWhere(plan: TypedNodePlan, elements: JevElement[]): string {
+  const anchor = plan.anchorId ? elements.find((e) => e.id === plan.anchorId)?.label : "";
+  return anchor ? `${plan.adjacent ? "beside" : "near"} ${anchor}` : "";
 }
 
 /** The typed node as the first of the three options: what Enter does, shown as a ghost while typing. */
 export function typedNodeOption(plan: TypedNodePlan, elements: JevElement[]): PredictedAction {
-  const beside = plan.anchorId ? elements.find((e) => e.id === plan.anchorId)?.label : "";
+  const where = placedWhere(plan, elements);
   return {
     id: uid("pred"),
     title: plan.node.label,
-    subtitle: beside ? `new node beside ${beside}` : "new node",
+    subtitle: where ? `new node ${where}` : "new node",
     category: "extend",
     tier: "minimal",
     nodeCount: 1,
@@ -340,7 +367,10 @@ export function connectionOptions(input: ConnectionInput): PredictedAction[] {
       e.kind === "arrow" && (e.fromId === node.id || e.toId === node.id) ? [e.fromId ?? "", e.toId ?? ""] : []
     )
   );
-  const others = input.elements.filter((e) => isComponentShape(e) && e.id !== node.id && !linked.has(e.id));
+  // A twin (another node with the same name) is a copy, not a neighbour: no link is offered between them.
+  const others = input.elements.filter(
+    (e) => isComponentShape(e) && e.id !== node.id && !linked.has(e.id) && norm(e.label) !== norm(node.label)
+  );
   const role = roleOf(node);
   const here = getElementCenter(node);
   const scored = others.map((other, index) => {
