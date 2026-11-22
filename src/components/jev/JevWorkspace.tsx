@@ -77,7 +77,7 @@ import {
   morphSelectionToNotation,
   validateMorphSemanticSpec,
 } from "@/lib/jev/notation-morph";
-import { isFlowText, planTypedNode } from "@/lib/jev/core-loop";
+import { enterDefaultIndex, isFlowText, NO_OPTION, planTypedNode, stepOption } from "@/lib/jev/core-loop";
 import {
   buildAfterCreateOptions,
   buildNextOptions,
@@ -656,7 +656,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
 
         setPredictions(top);
         opts.onRanked?.(top);
-        setActivePredIdx(0);
+        setActivePredIdx(optionsTouchedRef.current ? 0 : NO_OPTION);
         setTelemetry({
           source: isLiveModel ? data.source : "heuristic",
           model: data.model,
@@ -1106,7 +1106,9 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   }, [viewportCenterWorld, viewportWorld]);
 
   /**
-   * Shows the options at once (all local, instant). While the user is typing nothing is asked of the AI
+   * Shows the options at once (all local, instant). Nothing is highlighted unless `highlight` says so: Enter on
+   * the empty bar only takes what the user typed, picked, or a connection of the node they just added. While
+   * the user is typing nothing is asked of the AI
    * (`ask: false`). After a node is added, applied or clicked there is one call, sent once the board settles:
    * the context route names a next node from the board and jev scores the options. The highlight only moves
    * when the user moves it.
@@ -1115,12 +1117,12 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     (
       result: NextOptionsResult,
       els: JevElement[],
-      opts: { signal?: AbortSignal; keepMinimal?: boolean; ask?: boolean } = {}
+      opts: { signal?: AbortSignal; keepMinimal?: boolean; ask?: boolean; highlight?: number } = {}
     ) => {
       if (aiQuietRef.current) return;
       setIntent(result.intent);
       setPredictions(result.options);
-      setActivePredIdx(0);
+      setActivePredIdx(opts.highlight ?? NO_OPTION);
       optionsTouchedRef.current = Boolean(opts.keepMinimal);
       recordSuggestionShown(getBrowserStorage(), result.options.flatMap((o) => o.feedbackKeys ?? []));
       decideAbortRef.current?.abort();
@@ -1176,7 +1178,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     typedTextRef.current = text;
     const keepMinimal = completedRef.current;
     completedRef.current = false;
-    presentNextOptions(result, elementsRef.current, { keepMinimal, ask: false });
+    presentNextOptions(result, elementsRef.current, { keepMinimal, ask: false, highlight: 0 });
   }, [thoughtPrompt, elements, selectedIds, forkSession, aiQuiet, presentNextOptions]);
 
   const updateElements = useCallback(
@@ -1294,7 +1296,8 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         );
       }
       setPredictions(top3);
-      setActivePredIdx(0);
+      setActivePredIdx(NO_OPTION);
+      optionsTouchedRef.current = false;
       askWhenSettled(nextIntent, currentEls, adapted, top3, rankOpts);
     },
     [askWhenSettled]
@@ -1360,7 +1363,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         setIntent(null);
         return;
       }
-      presentNextOptions(result, els);
+      presentNextOptions(result, els, { highlight: enterDefaultIndex(result.options, nodeId) });
     },
     [presentNextOptions]
   );
@@ -1616,9 +1619,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       }
       if (predictions.length === 0) return;
       optionsTouchedRef.current = true;
-      setActivePredIdx((idx) =>
-        reverse ? (idx - 1 + predictions.length) % predictions.length : (idx + 1) % predictions.length
-      );
+      setActivePredIdx((idx) => stepOption(idx, predictions.length, reverse));
     },
     [thoughtPrompt, predictions.length, completion]
   );
@@ -2577,17 +2578,13 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       if (e.key === "Tab" && predictions.length > 0) {
         e.preventDefault();
         optionsTouchedRef.current = true;
-        setActivePredIdx((idx) =>
-          e.shiftKey
-            ? (idx - 1 + predictions.length) % predictions.length
-            : (idx + 1) % predictions.length
-        );
+        setActivePredIdx((idx) => stepOption(idx, predictions.length, e.shiftKey));
         return;
       }
 
       // Enter materializes the active ghost prediction, or edits title in place when a single item is selected
       if (e.key === "Enter") {
-        if (predictions.length > 0) {
+        if (predictions[activePredIdx]) {
           e.preventDefault();
           applyPrediction(activePredIdx);
           return;
@@ -3622,13 +3619,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
               return;
             }
             optionsTouchedRef.current = true;
-            setActivePredIdx((idx) =>
-              predictions.length === 0
-                ? 0
-                : reverse
-                  ? (idx - 1 + predictions.length) % predictions.length
-                  : (idx + 1) % predictions.length
-            );
+            setActivePredIdx((idx) => stepOption(idx, predictions.length, Boolean(reverse)));
           }}
           onEmptyEnter={() => {
             if (forkSession?.phase === "pressure") {
@@ -3639,7 +3630,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
               applyForkTake(forkSession.activeIndex);
               return;
             }
-            if (predictions.length > 0) applyPrediction(activePredIdx);
+            if (predictions[activePredIdx]) applyPrediction(activePredIdx);
           }}
           onEmptyUndo={handleUndo}
           onEmptyRedo={handleRedo}

@@ -131,23 +131,26 @@ def test_call_budget(page, skot, evidence):
             assert served[-1]["mode"] == "rank_actions" and served[-1]["subject"] == subject, \
                 "%s: the call must be about %r, got %s" % (what, subject, served[-1])
 
-    one_call_after("a node drawn with a tool", lambda: skot.add("box", "Audit log", skot.to_world(430, 480)), "Audit log")
+    # Fork left the view on the selection, so these steps use nodes that are on screen now.
+    api = skot.by_label("API service")
+    one_call_after("a node drawn with a tool",
+                   lambda: skot.add("box", "Audit log", (api["x"] + api["width"] / 2, api["y"] - 150)), "Audit log")
     one_call_after("an arrow drawn between two nodes", lambda: skot.connect("API service", "Audit log"), "Audit log")
 
-    def click_shopper():
+    def click_worker():
         skot.clear()
-        skot.click_element("Shopper")
-    one_call_after("a click on a node", click_shopper, "Shopper")
+        skot.click_element("Email worker")
+    one_call_after("a click on a node", click_worker, "Email worker")
 
-    def drag_shopper():
-        el = skot.by_label("Shopper")
+    def drag_worker():
+        el = skot.by_label("Email worker")
         sx, sy = skot.to_screen(el["x"] + el["width"] / 2, el["y"] + el["height"] * 0.55)
         page.mouse.move(sx, sy)
         page.mouse.down()
         page.mouse.move(sx, sy + 40, steps=6)
         page.mouse.move(sx, sy + 90, steps=6)
         page.mouse.up()
-    one_call_after("a node dragged to a new spot", drag_shopper)
+    one_call_after("a node dragged to a new spot", drag_worker)
 
     # 3. Three names typed one after another: the board settles once, so one call (about the last node).
     def three_names():

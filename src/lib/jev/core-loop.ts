@@ -553,3 +553,32 @@ export function connectionOptions(input: ConnectionInput): PredictedAction[] {
       };
     });
 }
+
+/** A connection of `nodeId` to the board: arrows only, each with one end on that node. */
+export function isConnectionOf(option: PredictedAction, nodeId: string): boolean {
+  return (
+    option.category === "connect" &&
+    !option.tier &&
+    option.addElements.length > 0 &&
+    option.addElements.every((e) => e.kind === "arrow" && (e.fromId === nodeId || e.toId === nodeId))
+  );
+}
+
+/** No suggestion is highlighted: Enter on the empty bar does nothing until the user picks one (Tab, 1-4, hover). */
+export const NO_OPTION = -1;
+
+/**
+ * Which suggestion Enter takes on the empty bar before the user picks one: the first, when it is a connection
+ * of the node they just added. Anything else (a node nobody typed, a bigger diagram) needs to be picked first.
+ */
+export function enterDefaultIndex(options: PredictedAction[], justAddedId: string | null): number {
+  const first = options[0];
+  return first && justAddedId && isConnectionOf(first, justAddedId) ? 0 : NO_OPTION;
+}
+
+/** Tab and Shift+Tab over the suggestions; from "nothing picked" they land on the first and the last. */
+export function stepOption(index: number, count: number, reverse: boolean): number {
+  if (count <= 0) return NO_OPTION;
+  if (index < 0 || index >= count) return reverse ? count - 1 : 0;
+  return reverse ? (index - 1 + count) % count : (index + 1) % count;
+}

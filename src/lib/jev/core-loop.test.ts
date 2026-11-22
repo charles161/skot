@@ -2,7 +2,16 @@
 // can connect with something existing we give it as a prediction. if the node is already there and the user
 // still added it, we should still add it in the best possible space possible."
 import { describe, expect, it } from "vitest";
-import { connectionOptions, isFlowText, planTypedNode, typedNodeLabel } from "@/lib/jev/core-loop";
+import {
+  connectionOptions,
+  enterDefaultIndex,
+  isConnectionOf,
+  isFlowText,
+  NO_OPTION,
+  planTypedNode,
+  stepOption,
+  typedNodeLabel,
+} from "@/lib/jev/core-loop";
 import {
   appendContextOption,
   bestContextOption,
@@ -678,5 +687,43 @@ describe("the node the AI names from the board", () => {
     for (let i = 0; i < tiers.length; i++) expect(placed[i]).toBe(tiers[i]);
     expect(ids(appendContextOption([opt("l1", 0)], ctx))).toEqual(["l1", "ctx_0"]);
     expect(ids(appendContextOption(placed, opt("ctx_1", 1)))).toEqual(["a", "b", "c", "ctx_0"]);
+  });
+});
+
+// Charles, 22 Nov (1A): "Enter on the empty bar accepts only a connection of the node just added. Any other
+// suggestion needs Tab first." Before: app, Enter, Enter, Enter added API Gateway and Auth Service.
+describe("what Enter takes on the empty bar", () => {
+  const board = [app, gateway];
+  const afterAdd = (els: JevElement[], nodeId: string) => buildAfterCreateOptions({ elements: els, nodeId, viewportCenter: CENTER })!;
+
+  it("a lone node has no connection to offer: nothing is highlighted", () => {
+    const { options } = afterAdd([app], "app");
+    expect(options.length).toBeGreaterThan(0);
+    expect(enterDefaultIndex(options, "app")).toBe(NO_OPTION);
+  });
+
+  it("a node that can connect to the board: its connection is what Enter takes", () => {
+    const { options } = afterAdd(board, "gw");
+    expect(isConnectionOf(options[0], "gw")).toBe(true);
+    expect(enterDefaultIndex(options, "gw")).toBe(0);
+  });
+
+  it("a connection between two other nodes, a new node, or no known node are never the default", () => {
+    const { options } = afterAdd(board, "gw");
+    expect(enterDefaultIndex(options, "someone-else")).toBe(NO_OPTION);
+    expect(enterDefaultIndex(options, null)).toBe(NO_OPTION);
+    const steps = options.filter((o) => o.addElements.some((e) => e.kind !== "arrow"));
+    expect(steps.length).toBeGreaterThan(0);
+    for (const step of steps) expect(isConnectionOf(step, "gw")).toBe(false);
+    expect(enterDefaultIndex(steps, "gw")).toBe(NO_OPTION);
+  });
+
+  it("Tab from nothing picks the first suggestion, Shift+Tab the last; then they cycle", () => {
+    expect(stepOption(NO_OPTION, 4, false)).toBe(0);
+    expect(stepOption(NO_OPTION, 4, true)).toBe(3);
+    expect(stepOption(3, 4, false)).toBe(0);
+    expect(stepOption(0, 4, true)).toBe(3);
+    expect(stepOption(1, 4, false)).toBe(2);
+    expect(stepOption(NO_OPTION, 0, false)).toBe(NO_OPTION);
   });
 });

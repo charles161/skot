@@ -158,7 +158,8 @@ def test_ai_on_demand(page, skot, evidence):
     assert (calls[0].get("context") or {}).get("subjectLabel") == "App", "the one call must carry the board context: %s" % calls[0].get("context")
     opts = read_options(page)
     titles = [o["title"] for o in opts]
-    assert len(opts) == 4 and opts[0]["active"], opts
+    assert len(opts) == 4, opts
+    assert not [o for o in opts if o["active"]], "1A: with no connection to offer nothing is highlighted: %s" % titles
     assert "Thumbnail Worker" in opts[3]["title"], "the board-named node is added after the three options, never in place of one: %s" % titles
     assert [o["tier"] for o in opts[:3]] == ["minimal", "cluster", "full"], "the three local options must stay as they were: %s" % titles
     assert "jev" in (opts[3]["pct"] or ""), "jev's pick should be marked: %s" % opts[3]
@@ -185,8 +186,8 @@ def test_ai_on_demand(page, skot, evidence):
         [(c.get("mode"), (c.get("context") or {}).get("subjectLabel")) for c in calls]
     opts = read_options(page)
     idx = next(i for i, o in enumerate(opts) if "Thumbnail Worker" in o["title"])
-    assert opts[0]["active"] and idx > 0, opts
-    for _ in range(idx):
+    assert idx > 0 and not [o for o in opts if o["active"]], opts
+    for _ in range(idx + 1):
         page.keyboard.press("Tab")
     page.keyboard.press("Enter")
     els = skot.wait_state(lambda es: any(e.get("label") == "Thumbnail Worker" for e in es), what="the board-named node")

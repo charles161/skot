@@ -220,19 +220,25 @@ def test_ghost_predictions(page, skot, evidence):
     skot.add("box", "Web App", skot.to_world(400, 260))
     before = skot.suggestion_titles()
     assert len(before) == 3, "expected three predictions after adding a node, got %s" % before
-    assert before[0]["active"], "the first prediction should start active"
+    # 1A (22 Nov): a suggestion nobody picked is not highlighted and has no ghost; Tab picks the first.
+    assert not [s for s in before if s["active"]], "no prediction is active until the user picks one: %s" % before
+    assert ghosts(page) == {"shapes": [], "arrows": []}, ghosts(page)
+    skot.press("Tab")
+    page.wait_for_timeout(300)
+    assert [s["n"] for s in skot.suggestion_titles(2) if s["active"]] == [1], "Tab picks prediction 1"
+    assert ghosts(page)["shapes"], "the picked prediction is previewed"
     skot.press("Tab")
     page.wait_for_timeout(300)
     after_tab = skot.suggestion_titles(2)
     active = [s["n"] for s in after_tab if s["active"]]
     assert active == [2], "Tab should make prediction 2 active, got %s" % after_tab
-    ghosts = page.locator("[role=application] svg").evaluate("s => s.innerHTML.length")
+    svg_bytes = page.locator("[role=application] svg").evaluate("s => s.innerHTML.length")
     n_before = len(skot.shapes())
     skot.press("Enter")
     els = skot.wait_state(lambda es: len([e for e in es if is_shape(e)]) > n_before, what="Enter to apply")
     new = [e.get("label") for e in els if is_shape(e) and e.get("label") != "Web App"]
     evidence.note(predictions=[s["title"] for s in before], applied=after_tab[1]["title"], new_nodes=new,
-                  svg_bytes=ghosts)
+                  svg_bytes=svg_bytes)
     assert new and any(n and n in after_tab[1]["title"] for n in new), \
         "Enter should add the active prediction %r, added %s" % (after_tab[1]["title"], new)
     assert any(a.get("fromId") == skot.by_label("Web App")["id"] for a in skot.arrows()), \
@@ -262,6 +268,7 @@ READ_OPTIONS_JS = """() => {
             pct: leaves.find(t => t.endsWith('%')) || null,
             tier: tier && tier.getAttribute('data-option-tier'),
             nodes: nodes ? +nodes.getAttribute('data-option-nodes') : null,
+            category: b.getAttribute('data-option-category'),
             active: b.getAttribute('aria-pressed') === 'true', text: b.innerText.replace(/\\s+/g, ' ')};
   })};
 }"""
@@ -330,6 +337,12 @@ def tab_through(page, evidence, cid, board_ids):
     """Tab through all three options; for each, the ghost on the canvas must be that option, attached to the board."""
     seen = {}
     opts = read_options(page)
+    if not any(o["active"] for o in opts):
+        # 1A (22 Nov): suggestions for a click or a selection are not highlighted until Tab picks the first.
+        assert ghosts(page) == {"shapes": [], "arrows": []}, "no ghost before a suggestion is picked: %s" % ghosts(page)
+        page.keyboard.press("Tab")
+        page.wait_for_timeout(200)
+        opts = read_options(page, 3)
     for _ in range(3):
         active = next(i for i, o in enumerate(opts) if o["active"])
         page.wait_for_timeout(250)

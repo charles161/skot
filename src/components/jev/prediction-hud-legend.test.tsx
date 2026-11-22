@@ -39,6 +39,22 @@ describe("the key legend says what Enter and Tab will do", () => {
     expect(moved).not.toMatch(/Connect API Gateway\?/);
   });
 
+  // Charles, 22 Nov (1A): Enter on the empty bar takes only a connection of the node just added. With nothing
+  // picked, no option is highlighted and the legend does not promise Enter.
+  it("with no suggestion picked: nothing is highlighted and the legend starts with Tab", () => {
+    const intent = { kind: "domain_continue" as const, headline: 'Next from "App"', detail: "small to big", relatedIds: [], timestamp: 1 };
+    const html = renderToStaticMarkup(<PredictionHud {...base} intent={intent} predictions={[node("a"), node("b"), node("c")]} activeIndex={-1} />);
+    expect(legend(html)).toBe("Tab pick a suggestion · Esc dismiss");
+    expect(html.match(/aria-pressed="true"/g)).toBeNull();
+    expect(text(html)).toMatch(/Next from &quot;App&quot;/);
+  });
+  it("after Tab picked the first suggestion: Enter adds it, and the hint says so", () => {
+    const panel = { ...base, predictions: [{ ...node("API Gateway"), title: "API Gateway" }, node("b"), node("c")] };
+    const html = renderToStaticMarkup(<PredictionHud {...panel} activeIndex={0} />);
+    expect(legend(html)).toBe("Enter ↵ add · Tab next option · Esc dismiss");
+    expect(text(html)).toMatch(/Enter adds API Gateway/);
+  });
+
   // Round-3 judge, prod: when the AI's fourth option arrived, options 1-3 slid over 100 px to the left and a
   // click aimed at option 2 hit option 3.
   it("keeps the suggestion panel in four columns from the start, so nothing moves when the AI adds one", () => {

@@ -40,12 +40,16 @@ const watchPhone = (onChange: () => void) => {
 /** A phone-width screen: the suggestions are one row of chips so the board stays visible. */
 const useIsPhone = () => useSyncExternalStore(watchPhone, () => window.matchMedia(PHONE).matches, () => false);
 
-/** What Enter and Tab do right now, in the order the user reaches for them. */
+/**
+ * What Enter and Tab do right now, in the order the user reaches for them. With no suggestion picked Enter does
+ * nothing, so the legend does not mention it: Tab picks first.
+ */
 function keyLegend(typing: boolean, completion: string | null, active: PredictedAction | undefined, activeIndex: number) {
-  const adds = active?.addElements.some((e) => e.kind !== "arrow") ?? false;
+  if (!active) return { enter: null, tab: "pick a suggestion" };
+  const adds = active.addElements.some((e) => e.kind !== "arrow");
   const enter = typing
     ? activeIndex === 0
-      ? adds && active?.addElements.length === 1
+      ? adds && active.addElements.length === 1
         ? "add node"
         : "draw"
       : `draw option ${activeIndex + 1}`
@@ -94,8 +98,11 @@ export function PredictionHud({
   // While typing there are up to three options and no AI call. Otherwise the AI may add a fourth a moment
   // later: its column is there from the start, so the first three never move under the pointer.
   const columns = typing ? (predictions.length > 1 ? "sm:grid-cols-3" : "") : "sm:grid-cols-4";
-  // The hint follows the highlight: once the user has moved it, it names what Enter does now.
-  const moved = activeIndex > 0 ? predictions[activeIndex] : undefined;
+  // The hint follows the highlight: once the user has picked an option, it names what Enter does now. The
+  // highlight they did not move (the typed node, an offered connection) keeps the intent's own wording.
+  const first = predictions[0];
+  const givenFirst = activeIndex === 0 && (typing || (first?.category === "connect" && !first.tier));
+  const moved = givenFirst ? undefined : predictions[activeIndex];
   const hint = moved
     ? { headline: `Enter ${moved.addElements.some((e) => e.kind !== "arrow") ? "adds" : "connects"} ${moved.title}`, detail: "" }
     : intent
@@ -218,9 +225,13 @@ export function PredictionHud({
                 data-key-legend
                 className="hidden items-center gap-1 font-mono text-[10.5px] text-muted-foreground sm:flex"
               >
-                <kbd className={KEY_PRIMARY}>Enter ↵</kbd>
-                <span>{legend.enter}</span>
-                <span aria-hidden="true">·</span>
+                {legend.enter && (
+                  <>
+                    <kbd className={KEY_PRIMARY}>Enter ↵</kbd>
+                    <span>{legend.enter}</span>
+                    <span aria-hidden="true">·</span>
+                  </>
+                )}
                 <kbd className={KEY}>Tab</kbd>
                 <span className="max-w-[16rem] truncate">{legend.tab}</span>
                 {!typing && (
