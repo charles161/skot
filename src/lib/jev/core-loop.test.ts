@@ -20,6 +20,7 @@ import {
   predictConcept,
   scoreOptions,
 } from "@/lib/jev/next-options";
+import { arrowHitsShape, labelRect, rectsIntersect } from "@/lib/jev/ghost-geometry";
 import type { PredictedAction } from "@/lib/jev/types";
 import type { JevElement, ShapeKind } from "@/lib/jev/types";
 
@@ -410,11 +411,25 @@ describe("connections are offered after the node exists, never applied", () => {
   });
 
   // Second judge on prod, 22 Nov: a ghost arrow ran through the node in between, its label over that node's name.
-  it("offers a link that crosses another node as a bare line, without a label on top of that node", () => {
+  // Since 2A the offered arrow goes around the nodes in between, so it keeps its label, clear of them.
+  it("offers a link past other nodes as an arrow that goes around them, label and all", () => {
     const far = el({ id: "new", label: "Search", x: 1000, y: 300 });
-    const options = connectionOptions({ elements: [app, gateway, postgres, far], nodeId: "new", anchorIds: ["app"], userPicked: true });
-    const crossing = options.find((o) => o.addElements[0].fromId === "app" || o.addElements[0].toId === "app")!;
-    expect(crossing.addElements[0].label).toBe("");
+    const board = [app, gateway, postgres, far];
+    const options = connectionOptions({ elements: board, nodeId: "new", anchorIds: ["app"], userPicked: true });
+    const past = options.find((o) => o.addElements[0].fromId === "app" || o.addElements[0].toId === "app")!;
+    const link = past.addElements[0];
+    const byId = new Map(board.map((e) => [e.id, e]));
+    expect(arrowHitsShape(link, byId, board, 4)).toBeNull();
+    expect(link.label).not.toBe("");
+    const box = labelRect(link, byId)!;
+    for (const node of [gateway, postgres]) expect(rectsIntersect(box, node)).toBe(false);
+  });
+
+  it("a link that cannot get around a node is offered as a bare line, without a label on top of that node", () => {
+    const far = el({ id: "new", label: "Search", x: 1000, y: 300 });
+    const wall = el({ id: "wall", label: "Wall", x: 500, y: -900, width: 172, height: 2400 });
+    const options = connectionOptions({ elements: [app, wall, far], nodeId: "new", anchorIds: ["app"], userPicked: true });
+    expect(options[0].addElements[0].label).toBe("");
     const beside = connectionOptions({ elements: [app, { ...far, x: 400 }], nodeId: "new", anchorIds: ["app"] });
     expect(beside[0].addElements[0].label).not.toBe("");
   });

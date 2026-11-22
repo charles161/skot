@@ -79,11 +79,128 @@ export function rectContainsCenter(outer: Rect, inner: Rect): boolean {
   );
 }
 
-/** Computes clean connection anchor points on the boundary of two shapes. */
+export interface ArrowGeometry {
+  start: Point;
+  end: Point;
+  /** Control point of the quadratic curve the arrow is drawn as. */
+  control: Point;
+}
+
+/** How close an arrow may pass a node it does not connect before it is routed around it. */
+export const ARROW_CLEARANCE = 10;
+/** How far the curve's control point may be pushed off the straight line, smallest first. */
+const ROUTE_OFFSETS = [70, 100, 130, 160, 190, 220, 250, 280, 320, 370, 430, 520];
+/** Where along the arrow the bend sits (0 = one end, 1 = the other). */
+const ROUTE_ALONG = [0.5, 0.3, 0.7];
+
+const isSketch = (el: JevElement) => !el.morphMeta || el.morphMeta.notation === "sketch";
+
+function quadraticAt(g: ArrowGeometry, t: number): Point {
+  const a = (1 - t) * (1 - t);
+  const b = 2 * (1 - t) * t;
+  const c = t * t;
+  return { x: a * g.start.x + b * g.control.x + c * g.end.x, y: a * g.start.y + b * g.control.y + c * g.end.y };
+}
+
+/** True when the curve passes within ARROW_CLEARANCE of one of the rectangles. */
+function curveHits(g: ArrowGeometry, all: Rect[]): boolean {
+  // The curve stays inside the triangle of its three points: only rectangles reaching into that box can be hit.
+  const minX = Math.min(g.start.x, g.control.x, g.end.x) - ARROW_CLEARANCE;
+  const maxX = Math.max(g.start.x, g.control.x, g.end.x) + ARROW_CLEARANCE;
+  const minY = Math.min(g.start.y, g.control.y, g.end.y) - ARROW_CLEARANCE;
+  const maxY = Math.max(g.start.y, g.control.y, g.end.y) + ARROW_CLEARANCE;
+  const rects = all.filter((r) => r.x < maxX && r.x + r.width > minX && r.y < maxY && r.y + r.height > minY);
+  if (rects.length === 0) return false;
+  const samples = Math.min(96, Math.max(24, Math.ceil(Math.hypot(g.end.x - g.start.x, g.end.y - g.start.y) / 16)));
+  for (let i = 1; i < samples; i += 1) {
+    const p = quadraticAt(g, i / samples);
+    for (const r of rects) {
+      if (
+        p.x > r.x - ARROW_CLEARANCE &&
+        p.x < r.x + r.width + ARROW_CLEARANCE &&
+        p.y > r.y - ARROW_CLEARANCE &&
+        p.y < r.y + r.height + ARROW_CLEARANCE
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Bends an arrow around the nodes between its two ends (Charles, 22 Nov 2026: "route arrows around nodes, never
+ * move nodes to do it"). The arrow stays one curve: its control point is pushed off the straight line, away from
+ * what is in the way, by the smallest step that clears everything; both directions of a pair take the same way
+ * round. With no clear way round the arrow is left as it was.
+ */
+function routeAroundNodes(
+  base: ArrowGeometry,
+  fromEl: JevElement,
+  toEl: JevElement,
+  elementsById: Map<string, JevElement>
+): ArrowGeometry {
+  const fc = getElementCenter(fromEl);
+  const tc = getElementCenter(toEl);
+  // The same chord for a -> b and b -> a, so both bend the same way.
+  const swap = fc.x > tc.x || (fc.x === tc.x && fc.y > tc.y);
+  const p = swap ? tc : fc;
+  const q = swap ? fc : tc;
+  const dx = q.x - p.x;
+  const dy = q.y - p.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 60) return base;
+  // A bend may be about as deep as the arrow is long, and always deep enough to get past one node's width
+  // (a stack of nodes: the arrow leaves by the side and comes back in by the side).
+  const offsets = ROUTE_OFFSETS.filter((m) => m <= Math.max(280, dist * 0.9));
+  const nodesWithin = (reach: number): Rect[] => {
+    const minX = Math.min(p.x, q.x) - reach;
+    const maxX = Math.max(p.x, q.x) + reach;
+    const minY = Math.min(p.y, q.y) - reach;
+    const maxY = Math.max(p.y, q.y) + reach;
+    const found: Rect[] = [];
+    for (const el of elementsById.values()) {
+      if (el.x > maxX || el.x + el.width < minX || el.y > maxY || el.y + el.height < minY) continue;
+      if (el.id === fromEl.id || el.id === toEl.id) continue;
+      if (!isShapeKind(el.kind) || isContainerKind(el.kind) || !isSketch(el)) continue;
+      found.push({ x: el.x, y: el.y, width: el.width, height: el.height });
+    }
+    return found;
+  };
+  // Most arrows have nothing in their way: that is settled with the few nodes beside the straight line.
+  if (!curveHits(base, nodesWithin(40 + ARROW_CLEARANCE))) return base;
+  const near = nodesWithin(offsets[offsets.length - 1] + ARROW_CLEARANCE);
+
+  // Which side the nodes in the way lie on: positive is the side the normal points to.
+  const nx = -dy / dist;
+  const ny = dx / dist;
+  let side = 0;
+  for (const r of near) {
+    if (!curveHits(base, [r])) continue;
+    side += (r.x + r.width / 2 - p.x) * nx + (r.y + r.height / 2 - p.y) * ny;
+  }
+  const away = side > 2 ? -1 : side < -2 ? 1 : -1;
+  // The bend sits over the middle of the arrow first; over one end when a node near the other blocks that.
+  for (const m of offsets) {
+    for (const along of ROUTE_ALONG) {
+      for (const sign of [away, -away]) {
+        const control = { x: p.x + dx * along + nx * sign * m, y: p.y + dy * along + ny * sign * m };
+        const candidate = { start: getBoundaryPoint(fromEl, control), end: getBoundaryPoint(toEl, control), control };
+        if (!curveHits(candidate, near)) return candidate;
+      }
+    }
+  }
+  return base;
+}
+
+/**
+ * Where an arrow is drawn: from the boundary of one shape to the boundary of the other, as one gentle curve,
+ * bent around any node that lies between them.
+ */
 export function resolveArrowEndpoints(
   arrow: JevElement,
   elementsById: Map<string, JevElement>
-): { start: Point; end: Point; control: Point } {
+): ArrowGeometry {
   const fromEl = arrow.fromId ? elementsById.get(arrow.fromId) : undefined;
   const toEl = arrow.toId ? elementsById.get(arrow.toId) : undefined;
 
@@ -121,7 +238,7 @@ export function resolveArrowEndpoints(
   const nx = dist > 0 ? -dy / dist : 0;
   const ny = dist > 0 ? dx / dist : 0;
 
-  return {
+  const base: ArrowGeometry = {
     start,
     end,
     control: {
@@ -129,6 +246,22 @@ export function resolveArrowEndpoints(
       y: midY + ny * offset,
     },
   };
+  const routable =
+    fromEl && toEl && fromEl.id !== toEl.id && arrow.arrowStyle !== "straight" && isSketch(arrow) && isSketch(fromEl) && isSketch(toEl);
+  return routable ? routeAroundNodes(base, fromEl, toEl, elementsById) : base;
+}
+
+/** Distance from a point to an arrow as drawn (its curve, not the straight line between its ends). */
+export function pointToArrowDistance(pt: Point, geom: ArrowGeometry): number {
+  const SEGMENTS = 16;
+  let best = Infinity;
+  let prev = geom.start;
+  for (let i = 1; i <= SEGMENTS; i += 1) {
+    const next = quadraticAt(geom, i / SEGMENTS);
+    best = Math.min(best, pointToSegmentDistance(pt, prev, next));
+    prev = next;
+  }
+  return best;
 }
 
 export function getBoundaryPoint(el: JevElement, toward: Point): Point {

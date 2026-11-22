@@ -28,10 +28,11 @@ import {
   getElementRect,
   isShapeElement,
   makeSeed,
-  pointToSegmentDistance,
+  pointToArrowDistance,
   rectsOverlap,
   resolveArrowEndpoints,
   uid,
+  type ArrowGeometry,
 } from "@/lib/jev/geometry";
 import {
   computeArrowHeadPath,
@@ -347,6 +348,19 @@ export function JevCanvas({
     return map;
   }, [elementsById, activePrediction]);
 
+  /** One geometry per board arrow for this board state: drawing, hit-testing and the marquee read the same curve. */
+  const arrowGeometries = useMemo(() => {
+    const computed = new Map<string, ArrowGeometry>();
+    for (const el of elements) {
+      if (el.kind === "arrow") computed.set(el.id, resolveArrowEndpoints(el, elementsById));
+    }
+    return computed;
+  }, [elements, elementsById]);
+  const arrowGeometry = useCallback(
+    (arrow: JevElement): ArrowGeometry => arrowGeometries.get(arrow.id) ?? resolveArrowEndpoints(arrow, elementsById),
+    [arrowGeometries, elementsById]
+  );
+
   const removedGhostSet = useMemo(
     () => new Set(activePrediction?.removeIds ?? []),
     [activePrediction]
@@ -412,8 +426,7 @@ export function JevCanvas({
       );
       for (let i = arrows.length - 1; i >= 0; i--) {
         const arr = arrows[i];
-        const { start, end } = resolveArrowEndpoints(arr, elementsById);
-        if (pointToSegmentDistance(pt, start, end) < 12) {
+        if (pointToArrowDistance(pt, arrowGeometry(arr)) < 12) {
           return arr;
         }
       }
@@ -452,7 +465,7 @@ export function JevCanvas({
       }
       return null;
     },
-    [elements, elementsById]
+    [elements, arrowGeometry]
   );
 
   useEffect(() => {
@@ -705,7 +718,7 @@ export function JevCanvas({
               matched.add(el.id);
             }
           } else if (el.kind === "arrow") {
-            const { start, end } = resolveArrowEndpoints(el, elementsById);
+            const { start, end } = arrowGeometry(el);
             const arrowRect = {
               x: Math.min(start.x, end.x),
               y: Math.min(start.y, end.y),
@@ -1264,10 +1277,7 @@ export function JevCanvas({
           {/* 4. ARROWS */}
           {arrows.map((arrow) => {
             const pal = getTonePalette(arrow.tone, theme);
-            const { start, end, control } = resolveArrowEndpoints(
-              arrow,
-              elementsById
-            );
+            const { start, end, control } = arrowGeometry(arrow);
             const isSelected = selectedSet.has(arrow.id);
             const isBeingReplaced = removedGhostSet.has(arrow.id);
             const stroke = isSelected ? accentColor : pal.stroke;
@@ -2000,12 +2010,12 @@ export function JevCanvas({
           ? resolveArrowEndpoints(editingElement, elementsById)
           : null;
         const left = isArrow && arrowMid
-          ? viewport.x + ((arrowMid.start.x + arrowMid.end.x) / 2) * viewport.zoom - 64
+          ? viewport.x + (0.25 * arrowMid.start.x + 0.5 * arrowMid.control.x + 0.25 * arrowMid.end.x) * viewport.zoom - 64
           : isFrame
             ? viewport.x + (editingElement.x + 12) * viewport.zoom
             : viewport.x + (editingElement.x + 10) * viewport.zoom;
         const top = isArrow && arrowMid
-          ? viewport.y + ((arrowMid.start.y + arrowMid.end.y) / 2) * viewport.zoom - 14
+          ? viewport.y + (0.25 * arrowMid.start.y + 0.5 * arrowMid.control.y + 0.25 * arrowMid.end.y) * viewport.zoom - 14
           : isFrame
             ? viewport.y + (editingElement.y + 6) * viewport.zoom
             : viewport.y +

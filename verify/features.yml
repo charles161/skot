@@ -138,6 +138,21 @@ features:
       - src/app/api/jev/decide/route.ts
       - src/lib/jev/llm-graph-client.ts
 
+  - id: arrows-route-around
+    title: "2A: an arrow goes around the node between its two ends, whether drawn with the arrow tool, offered as a
+      ghost connection or accepted; no node moves to make room"
+    check: arrows-route-around
+    sources:
+      - src/lib/jev/geometry.ts
+      - src/components/jev/JevCanvas.tsx
+
+  - id: arrows-route-stack
+    title: "2A on a phone: in a single column of nodes every suggested and accepted arrow that skips a node goes
+      round its side, never through it"
+    check: arrows-route-stack
+    sources:
+      - src/lib/jev/geometry.ts
+
   - id: call-budget
     title: "Drawing does not drain the AI budget: nothing is asked while a shape, label or arrow is in progress; a
       settled add, arrow, click or drag costs one call; a 6-node, 5-arrow board drawn quickly costs at most 3, and
