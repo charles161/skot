@@ -1037,6 +1037,15 @@ function materialize(draft: Draft, ctx: Context): Materialized {
         );
       }
     }
+    // The layout spaces a tree out from its anchor; on a crowded board that spot can already be taken. A node
+    // never lands on another node: it moves to the nearest free spot instead.
+    const size = sizeFor(f.kind);
+    const solidNow = [...elements, ...created.values()].filter(
+      (e) => e.kind !== "arrow" && e.kind !== "freedraw" && e.kind !== "frame" && e.kind !== "zone" && e.kind !== "fragment"
+    );
+    if (solidNow.some((o) => rectsIntersect({ x: at.x, y: at.y, ...size }, o, 4))) {
+      at = freeSpotAround({ x: at.x + size.width / 2, y: at.y + size.height / 2 }, size, [...elements, ...created.values()]);
+    }
     created.set(f.id, { ...makeShape(f.kind, f.label, f.sublabel, at), id: f.id, seed: makeSeed(f.id) });
   }
   const shapes = fresh.map((f) => created.get(f.id)!);

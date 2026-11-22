@@ -91,6 +91,9 @@ export function PredictionHud({
     (isJevModelSource(telemetry?.source) || telemetry?.source === "llm-json") &&
     telemetry?.isHeuristic !== true;
   const legend = keyLegend(typing, completion, predictions[activeIndex], activeIndex);
+  // While typing there are up to three options and no AI call. Otherwise the AI may add a fourth a moment
+  // later: its column is there from the start, so the first three never move under the pointer.
+  const columns = typing ? (predictions.length > 1 ? "sm:grid-cols-3" : "") : "sm:grid-cols-4";
   // The hint follows the highlight: once the user has moved it, it names what Enter does now.
   const moved = activeIndex > 0 ? predictions[activeIndex] : undefined;
   const hint = moved
@@ -165,7 +168,7 @@ export function PredictionHud({
       role="region"
       aria-label="Predictive drafting suggestions"
       className={`pointer-events-auto flex w-full flex-col items-center gap-2 px-3 ${
-        predictions.length > 3 ? "max-w-[min(980px,100vw)]" : "max-w-[min(780px,100vw)]"
+        typing ? "max-w-[min(780px,100vw)]" : "max-w-[min(980px,100vw)]"
       }`}
     >
       {/* Compact Spatial Intent Understanding Pill */}
@@ -239,11 +242,7 @@ export function PredictionHud({
             </div>
           </div>
 
-          <div
-            className={`grid grid-cols-1 gap-1.5 ${
-              predictions.length > 3 ? "sm:grid-cols-4" : predictions.length > 1 ? "sm:grid-cols-3" : ""
-            }`}
-          >
+          <div className={`grid grid-cols-1 gap-1.5 ${columns}`}>
             {predictions.map((pred, idx) => {
               const isActive = idx === activeIndex;
               // The order and the highlight are the board's; jev's pick alone carries its percentage.

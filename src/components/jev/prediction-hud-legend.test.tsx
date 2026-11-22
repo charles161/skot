@@ -39,6 +39,19 @@ describe("the key legend says what Enter and Tab will do", () => {
     expect(moved).not.toMatch(/Connect API Gateway\?/);
   });
 
+  // Round-3 judge, prod: when the AI's fourth option arrived, options 1-3 slid over 100 px to the left and a
+  // click aimed at option 2 hit option 3.
+  it("keeps the suggestion panel in four columns from the start, so nothing moves when the AI adds one", () => {
+    const classes = (html: string) => html.match(/class="grid [^"]*"/)?.[0] ?? "";
+    const three = renderToStaticMarkup(<PredictionHud {...base} predictions={[link, node("b"), node("c")]} />);
+    const four = renderToStaticMarkup(<PredictionHud {...base} predictions={[link, node("b"), node("c"), node("d")]} />);
+    expect(classes(three)).toMatch(/sm:grid-cols-4/);
+    expect(classes(three)).toBe(classes(four));
+    expect(three.match(/max-w-\[min\(\d+px/)?.[0]).toBe(four.match(/max-w-\[min\(\d+px/)?.[0]);
+    const typed = renderToStaticMarkup(<PredictionHud {...base} typing predictions={[node("a"), node("b"), node("c")]} />);
+    expect(classes(typed)).toMatch(/sm:grid-cols-3/);
+  });
+
   it("lays four options out in four columns when the AI has added one", () => {
     const html = renderToStaticMarkup(<PredictionHud {...base} predictions={[node("a"), node("b"), node("c"), node("d")]} />);
     expect(html).toMatch(/sm:grid-cols-4/);

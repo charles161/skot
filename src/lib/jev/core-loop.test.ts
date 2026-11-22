@@ -569,6 +569,52 @@ describe("typing shows what Enter adds as option 1", () => {
   });
 });
 
+// Round-3 judge, prod: "postgres⏎ api⏎ redis⏎ postgres⏎ kafka Tab Tab ⏎" put Backups on top of Worker. Rule 2
+// (never on another node) holds for every option, not only for the typed node.
+describe("no option ever puts a node on another node", () => {
+  const grow = (names: string[]) => {
+    let board: JevElement[] = [];
+    let last: string | null = null;
+    for (const name of names) {
+      const node: JevElement = planTypedNode({ text: name, elements: board, lastFocusedId: last, viewportCenter: CENTER })!.node;
+      board = [...board, node];
+      last = node.id;
+    }
+    return { board, last: last! };
+  };
+  const clashes = (board: JevElement[], input: Parameters<typeof buildNextOptions>[0]) => {
+    const found: string[] = [];
+    for (const [i, o] of (buildNextOptions(input)?.options ?? []).entries()) {
+      const shapes = o.addElements.filter((e) => e.kind !== "arrow");
+      shapes.forEach((a, k) => {
+        for (const b of [...board, ...shapes.slice(k + 1)]) if (boxesOverlap(a, b)) found.push(`option ${i + 1}: ${a.label} on ${b.label}`);
+      });
+    }
+    return found;
+  };
+
+  it("the judge's board: kafka after postgres, api, redis, postgres", () => {
+    const { board, last } = grow(["postgres", "api", "redis", "postgres"]);
+    expect(clashes(board, { elements: board, text: "kafka", subjectId: last, viewportCenter: CENTER })).toEqual([]);
+  });
+
+  it("150 seeded boards, typed options and the options after a node is added", { timeout: 30_000 }, () => {
+    let seed = 7;
+    const rand = () => {
+      seed = (seed * 1664525 + 1013904223) % 4294967296;
+      return seed / 4294967296;
+    };
+    const names = ["app", "api gateway", "postgres", "redis", "kafka", "worker", "cdn", "billing", "auth", "search", "s3", "orders"];
+    const pick = () => names[Math.floor(rand() * names.length)];
+    for (let round = 0; round < 150; round++) {
+      const { board, last } = grow(Array.from({ length: 2 + Math.floor(rand() * 9) }, pick));
+      const typedClash = clashes(board, { elements: board, text: pick(), subjectId: last, viewportCenter: CENTER });
+      expect(typedClash, `round ${round} typed`).toEqual([]);
+      expect(clashes(board, { elements: board, subjectId: last, viewportCenter: CENTER }), `round ${round} after add`).toEqual([]);
+    }
+  });
+});
+
 // Charles, 22 Nov 2026 (5A): nothing is asked while typing; after a node is added or clicked, one call names a
 // next node from the board (the context route) and jev scores the options.
 describe("the node the AI names from the board", () => {
