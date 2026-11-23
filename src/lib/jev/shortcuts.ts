@@ -18,6 +18,7 @@ export const TOOL_SHORTCUT_KEYS: Readonly<Record<DockTool, string>> = {
   frame: "Z",
   freedraw: "P",
   text: "T",
+  markdown: "M",
 };
 
 const KEY_TO_TOOL = new Map<string, DockTool>(

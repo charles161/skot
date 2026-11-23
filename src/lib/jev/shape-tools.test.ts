@@ -47,6 +47,7 @@ describe("keyboard: new kinds steal no keys", () => {
       frame: "Z",
       freedraw: "P",
       text: "T",
+      markdown: "M",
     });
   });
 

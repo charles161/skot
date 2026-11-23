@@ -186,7 +186,7 @@ export function SelectionInspector({
   if (!element || !placement || hiddenWhileInteracting) return null;
 
   const isShape = SWAPPABLE_KINDS.has(element.kind);
-  const forkable = isShape && !isLldKind(element.kind) && element.kind !== "card";
+  const forkable = isShape && !isLldKind(element.kind) && element.kind !== "card" && element.kind !== "markdown";
   const arrowEnds = element.kind === "arrow" ? resolveArrowEnds(element) : null;
   const rowsEdit = ROWS_EDIT[element.kind];
 

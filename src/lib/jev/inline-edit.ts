@@ -1,4 +1,5 @@
 import { makeSeed } from "./geometry";
+import { fitMarkdownNodeSize } from "./markdown";
 import type { ElementKind, JevElement, Point } from "./types";
 
 export type EditField = "label" | "sublabel";
@@ -14,8 +15,8 @@ export interface LabelEditSession {
 const SUBLABEL_ZONE_START = 0.6;
 export const TEXT_DEFAULT_SIZE = { width: 180, height: 42 } as const;
 
-/** ER entity rows, UML class compartments, fragment guards, API card rows, note bullets: one sublabel line per row. */
-const MULTILINE_SUBLABEL_KINDS = new Set<ElementKind>(["entity", "class", "fragment", "api", "card"]);
+/** ER entity rows, UML class compartments, fragment guards, API card rows, note bullets, markdown body. */
+const MULTILINE_SUBLABEL_KINDS = new Set<ElementKind>(["entity", "class", "fragment", "api", "card", "markdown"]);
 const HEADER_BAND = { max: 32, ratio: 0.35 };
 
 export function isMultilineField(kind: ElementKind, field: EditField): boolean {
@@ -115,7 +116,12 @@ export function commitLabelEdit(
     if ((target.sublabel ?? "") === next) return elements;
     const { sublabel: _drop, ...rest } = target;
     void _drop;
-    updated = next ? { ...target, sublabel: next, updatedAt: now } : { ...rest, updatedAt: now };
+    if (target.kind === "markdown") {
+      const fitted = next ? fitMarkdownNodeSize(next, { width: target.width, height: target.height }) : {};
+      updated = next ? { ...target, sublabel: next, ...fitted, updatedAt: now } : { ...rest, updatedAt: now };
+    } else {
+      updated = next ? { ...target, sublabel: next, updatedAt: now } : { ...rest, updatedAt: now };
+    }
   } else {
     const label = next || (target.kind === "arrow" ? "" : target.label || "Node");
     if (label === target.label) return elements;

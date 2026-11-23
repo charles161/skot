@@ -596,6 +596,16 @@ export function IconNoteCard(props: IconProps) {
   );
 }
 
+export function IconMarkdown(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d={sketchRect(2.5, 4.5, 19, 15)} />
+      <path d="M6 15.5v-7l3 3.8 3-3.8v7" />
+      <path d="M16.5 8.5v7M14.3 13.2l2.2 2.3 2.2-2.3" />
+    </Icon>
+  );
+}
+
 export function IconSequence(props: IconProps) {
   return (
     <Icon {...props}>
@@ -970,6 +980,7 @@ export const ICONS: { name: string; Icon: IconComponent }[] = [
   { name: "IconFinalState", Icon: IconFinalState },
   { name: "IconApiCard", Icon: IconApiCard },
   { name: "IconNoteCard", Icon: IconNoteCard },
+  { name: "IconMarkdown", Icon: IconMarkdown },
   { name: "IconSequence", Icon: IconSequence },
   { name: "IconStateMachine", Icon: IconStateMachine },
   { name: "IconEstimate", Icon: IconEstimate },

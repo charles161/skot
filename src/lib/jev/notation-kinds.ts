@@ -32,7 +32,7 @@ export function isArrowEnd(value: unknown): value is ArrowEnd {
 }
 
 /** Notes, cards, containers and notation glyphs: on the board, but never a system component to suggest or link. */
-const NON_COMPONENT_KINDS = new Set<string>(["frame", "zone", "text", "card", "fragment", "activation", "initial", "final"]);
+const NON_COMPONENT_KINDS = new Set<string>(["frame", "zone", "text", "markdown", "card", "fragment", "activation", "initial", "final"]);
 
 export function isComponentShape(el: Pick<JevElement, "kind">): boolean {
   return isShapeKind(el.kind) && !NON_COMPONENT_KINDS.has(el.kind);
@@ -258,6 +258,7 @@ export const DEFAULT_KIND_SIZE: Record<ShapeKind, { width: number; height: numbe
   ellipse: { width: 132, height: 76 },
   frame: { width: 360, height: 240 },
   text: { width: 160, height: 40 },
+  markdown: { width: 320, height: 220 },
   queue: { width: 176, height: 64 },
   cache: { width: 140, height: 76 },
   lb: { width: 132, height: 76 },
@@ -282,6 +283,7 @@ export const KIND_LABELS: Record<ShapeKind, string> = {
   ellipse: "Actor (oval)",
   frame: "Frame",
   text: "Text",
+  markdown: "Markdown",
   queue: "Queue / stream",
   cache: "Cache",
   lb: "Load balancer / CDN",

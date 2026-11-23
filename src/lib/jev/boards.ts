@@ -8,7 +8,6 @@ import {
   type StorageLike,
 } from "./recovery-buffer";
 import { boardPath, generateRoomCredentials, ROOM_ID_PATTERN, ROOM_SECRET_PATTERN, type RoomCredentials } from "./room-auth";
-import { readSavedBoard } from "./saved-board";
 import { boardStorageKey } from "./storage-keys";
 
 /*
@@ -233,7 +232,7 @@ export interface MissingBoardInfo {
 
 export function resolveBoard(
   storage: BoardStorage | null,
-  { pathname, hash, collab, now }: BoardAddress
+  { pathname, hash, collab }: BoardAddress
 ): OpenBoard | MissingBoardInfo {
   let readable = storage;
   try {
@@ -243,21 +242,11 @@ export function resolveBoard(
   }
 
   const address = readAddress(pathname, hash);
-  let { id } = address;
+  const { id } = address;
   if (id === null) {
-    if (!address.create) {
-      // A board that can't be opened stays in My boards: at / it would hide every other one.
-      const last = listBoards(readable, now).find(
-        (b) => b.edited !== null && readSavedBoard(readable!.getItem(boardStorageKey(b.id))).kind !== "unreadable"
-      );
-      if (last) id = last.id;
-      // Looking at / again and again must not make board after board.
-      else id = readNewBoards(readable).find((b) => readable && !isKept(readable, b.roomId))?.roomId ?? null;
-    }
-    if (id === null) {
-      const board = startBoard(readable);
-      return { kind: "open", ...board, createdNew: true, joining: false, url: boardUrl(board, collab) };
-    }
+    // Plain / and /new both open a fresh board; existing boards only open via their exact /b/<id> path (or My boards).
+    const board = startBoard(readable);
+    return { kind: "open", ...board, createdNew: true, joining: false, url: boardUrl(board, collab) };
   }
 
   const kept = readable !== null && isKept(readable, id);

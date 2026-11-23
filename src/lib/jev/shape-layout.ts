@@ -7,6 +7,7 @@ import {
   type EntityRow,
   type HttpMethod,
 } from "./notation-kinds";
+import { markdownToPlainLines } from "./markdown";
 import type { BoardTheme, ElementKind, JevElement } from "./types";
 
 /** Board paper colour per theme (globals.css --jev-paper); hollow markers and activation bars are filled with it. */
@@ -124,6 +125,7 @@ export function shapeLabelBox(el: Pick<JevElement, "kind" | "width" | "height" |
     case "frame":
     case "api":
     case "card":
+    case "markdown":
       return null;
     default:
       return { x: 10, y: 6, width: w - 20, height: h - 12 };
@@ -495,6 +497,40 @@ export function layoutShapeGlyphs(el: JevElement): ShapeGlyphs | null {
       return apiGlyphs(el);
     case "card":
       return cardGlyphs(el);
+    case "markdown": {
+      const texts: GlyphText[] = [];
+      const headerH = Math.min(34, Math.max(24, el.height * 0.25));
+      const title = el.label.trim();
+      if (title) {
+        texts.push({
+          x: 12,
+          y: Math.round(headerH * 0.68),
+          text: clip(title, charsFor(el.width - 52, 12, false)),
+          anchor: "start",
+          size: 12,
+          weight: 700,
+          font: "label",
+          tone: "text",
+        });
+      }
+      const lines = markdownToPlainLines(el.sublabel);
+      const rowH = 16;
+      const cap = Math.max(0, Math.floor((el.height - headerH - 12) / rowH));
+      const maxChars = charsFor(el.width - 24, 11, false);
+      lines.slice(0, cap).forEach((line, idx) => {
+        texts.push({
+          x: 12,
+          y: Math.round(headerH + 16 + idx * rowH),
+          text: clip(line, maxChars),
+          anchor: "start",
+          size: 11,
+          weight: 500,
+          font: "label",
+          tone: "subtext",
+        });
+      });
+      return { texts, badges: [] };
+    }
     case "zone": {
       const text = el.label.split("\n")[0]?.trim() ?? "";
       return {

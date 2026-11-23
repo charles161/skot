@@ -19,6 +19,9 @@ import {
 } from "@/lib/jev/inline-edit";
 import { isShapeTool, shapeFromTool } from "@/lib/jev/shape-tools";
 import { MultilineSublabelEditor } from "@/components/jev/MultilineSublabelEditor";
+import { MarkdownNodeEditor } from "@/components/jev/MarkdownNodeEditor";
+import { MarkdownNodeView } from "@/components/jev/MarkdownNodeView";
+import { fitMarkdownNodeSize, toggleMarkdownCheckbox } from "@/lib/jev/markdown";
 import { shouldCaptureOnMove, type DragMode } from "@/lib/jev/pointer-capture";
 import {
   computeBounds,
@@ -489,6 +492,57 @@ export function JevCanvas({
     };
   }, [startEditRef, elementsById, startEdit]);
 
+  const markdownCommitRef = useRef<(() => void) | null>(null);
+  const registerMarkdownCommit = useCallback((fn: (() => void) | null) => {
+    markdownCommitRef.current = fn;
+  }, []);
+
+  const commitMarkdownEdit = useCallback(
+    (id: string, next: { label: string; sublabel: string }) => {
+      const undoSnapshot = editState?.undoSnapshot;
+      startEdit(null);
+      const target = elements.find((el) => el.id === id);
+      if (!target) return;
+      const nextLabel = next.label.trim() || target.label || "Markdown Note";
+      const nextSub = next.sublabel.replace(/\r\n?/g, "\n").replace(/\n+$/g, "");
+      if (nextLabel === target.label && nextSub === (target.sublabel ?? "")) return;
+      const now = Date.now();
+      const fitted = nextSub ? fitMarkdownNodeSize(nextSub, { width: target.width, height: target.height }) : {};
+      const nextElements = onElementsChange(
+        (prev) =>
+          prev.map((el) => {
+            if (el.id !== id) return el;
+            const { sublabel: _drop, ...rest } = el;
+            void _drop;
+            return nextSub
+              ? { ...el, label: nextLabel, sublabel: nextSub, ...fitted, updatedAt: now }
+              : { ...rest, label: nextLabel, updatedAt: now };
+          }),
+        { recordUndo: true, flushBroadcast: true, ...(undoSnapshot ? { undoSnapshot } : {}) }
+      );
+      const updatedEl = nextElements.find((el) => el.id === id);
+      if (updatedEl) onElementLabelEdited(updatedEl);
+    },
+    [editState, elements, onElementsChange, onElementLabelEdited, startEdit]
+  );
+
+  const toggleMarkdownTask = useCallback(
+    (id: string, lineIndex: number) => {
+      const now = Date.now();
+      onElementsChange(
+        (prev) =>
+          prev.map((el) => {
+            if (el.id !== id || el.kind !== "markdown") return el;
+            const nextSub = toggleMarkdownCheckbox(el.sublabel ?? "", lineIndex);
+            if (nextSub === (el.sublabel ?? "")) return el;
+            return { ...el, sublabel: nextSub, updatedAt: now };
+          }),
+        { recordUndo: true, flushBroadcast: true }
+      );
+    },
+    [onElementsChange]
+  );
+
   const commitInlineEdit = useCallback(() => {
     if (!editState) return;
     const { session, undoSnapshot } = editState;
@@ -532,6 +586,10 @@ export function JevCanvas({
 
   const handleWheel = useCallback(
     (e: WheelEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('[data-testid="markdown-editor"]')) return;
+      const mdScroll = target?.closest('[data-markdown-scroll="1"]') as HTMLElement | null;
+      if (mdScroll && mdScroll.scrollHeight > mdScroll.clientHeight) return;
       e.preventDefault();
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
@@ -551,7 +609,11 @@ export function JevCanvas({
 
   const handlePointerDown = (e: React.PointerEvent) => {
     if (editingId) {
-      commitInlineEdit();
+      if (elementsById.get(editingId)?.kind === "markdown" && markdownCommitRef.current) {
+        markdownCommitRef.current();
+      } else {
+        commitInlineEdit();
+      }
     }
 
     const world = screenToWorld(e.clientX, e.clientY);
@@ -1006,7 +1068,11 @@ export function JevCanvas({
       );
       onElementsChange((prev) => (behind ? [created, ...prev] : [...prev, created]), { recordUndo: true });
       onSelectIds([id]);
-      if (editLabel) startEdit({ id, field: "label", draft: created.label, createdForEdit: false });
+      if (created.kind === "markdown") {
+        startEdit({ id, field: "sublabel", draft: created.sublabel ?? "", createdForEdit: false });
+      } else if (editLabel) {
+        startEdit({ id, field: "label", draft: created.label, createdForEdit: false });
+      }
       onElementCreated(created);
       onToolChange("select");
     }
@@ -1445,7 +1511,26 @@ export function JevCanvas({
                   />
                 )}
 
-                {editingId !== el.id && glyphs && (
+                {editingId !== el.id && el.kind === "markdown" && (
+                  <foreignObject
+                    x={0}
+                    y={0}
+                    width={Math.max(40, el.width)}
+                    height={Math.max(40, el.height)}
+                  >
+                    <MarkdownNodeView
+                      element={el}
+                      palette={pal}
+                      theme={theme}
+                      isSelected={isSelected}
+                      onToggleCheckbox={(lineIdx) => toggleMarkdownTask(el.id, lineIdx)}
+                      onRequestEdit={() =>
+                        startEdit({ id: el.id, field: "sublabel", draft: el.sublabel ?? "", createdForEdit: false })
+                      }
+                    />
+                  </foreignObject>
+                )}
+                {editingId !== el.id && el.kind !== "markdown" && glyphs && (
                   <ShapeGlyphText glyphs={glyphs} pal={pal} labelFontClass={fontClassFor(elStyle)} />
                 )}
                 {editingId !== el.id && labelBox && (
@@ -2002,6 +2087,21 @@ export function JevCanvas({
       {/* SEAMLESS IN-PLACE TITLE EDITOR */}
       {editingElement && (() => {
         const editPal = getTonePalette(editingElement.tone, theme);
+        if (editingElement.kind === "markdown") {
+          return (
+            <MarkdownNodeEditor
+              element={editingElement}
+              viewport={viewport}
+              palette={editPal}
+              theme={theme}
+              initialTitle={editingElement.label}
+              initialBody={editingElement.sublabel ?? ""}
+              onRegisterCommit={registerMarkdownCommit}
+              onCommit={(next) => commitMarkdownEdit(editingElement.id, next)}
+              onCancel={cancelInlineEdit}
+            />
+          );
+        }
         if (editSession && isMultilineField(editingElement.kind, editSession.field)) {
           return (
             <MultilineSublabelEditor

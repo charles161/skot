@@ -9,7 +9,9 @@ import { getPracticePrompt, type PracticePromptId } from "@/lib/jev/practice-pro
 import type { ReviewComment } from "@/lib/jev/practice-review";
 import { parsePracticeSession, practiceStorageKey, startPracticeSession, storePracticeSession, type PracticeSession } from "@/lib/jev/practice-session";
 import { useBoardTheme } from "@/lib/theme-store";
-import { IconActor, IconArrow, IconBox, IconBroadcast, IconClose, IconDatabase, IconDiamond, IconDownload, IconFit, IconFork, IconFrame, IconHand, IconMinus, IconMoon, IconPacks, IconPen, IconPlus, IconRedo, IconReset, IconSelect, IconSpark, IconSun, IconTarget, IconText, IconTrash, IconUndo } from "@/brand/icons";
+import { IconActor, IconArrow, IconBox, IconBroadcast, IconClose, IconDatabase, IconDiamond, IconDownload, IconFit, IconFork, IconFrame, IconHand, IconLayers, IconMarkdown, IconMinus, IconMoon, IconPacks, IconPen, IconPlus, IconRedo, IconReset, IconSelect, IconSpark, IconSun, IconTarget, IconText, IconTrash, IconUndo } from "@/brand/icons";
+import { newBoardPath } from "@/lib/jev/boards";
+import { fitMarkdownNodeSize, resolveClipboardMarkdown } from "@/lib/jev/markdown";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -212,6 +214,7 @@ const TOOLS: Array<{
   { id: "frame", label: "Zone Frame", key: toolShortcutLabel("frame"), icon: <IconFrame className="h-4 w-4" /> },
   { id: "freedraw", label: "Ink Pen", key: toolShortcutLabel("freedraw"), icon: <IconPen className="h-4 w-4" /> },
   { id: "text", label: "Text Note", key: toolShortcutLabel("text"), icon: <IconText className="h-4 w-4" /> },
+  { id: "markdown", label: "Markdown", key: toolShortcutLabel("markdown"), icon: <IconMarkdown className="h-4 w-4" /> },
 ];
 
 const PEER_NAMES = ["Maya", "Soren", "Nadia", "Kavi", "Elena", "Theo"];
@@ -2656,11 +2659,14 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       if (!isShapeTool(kind)) return;
       const id = uid(kind === "frame" ? "frm" : "el");
       const placed = shapeFromTool(kind, viewportCenterWorld, viewportCenterWorld, id, Date.now());
-      const created: JevElement = placed.behind ? placed.element : { ...placed.element, tone: "cobalt" };
+      const created: JevElement = placed.behind || kind === "markdown" ? placed.element : { ...placed.element, tone: "cobalt" };
       updateElements((prev) => (placed.behind ? [created, ...prev] : [...prev, created]));
       setSelectedIds([id]);
       handleElementCreated(created);
       setTool("select");
+      if (kind === "markdown") {
+        window.requestAnimationFrame(() => startInlineEditRef.current?.(id, "sublabel"));
+      }
     },
     [viewportCenterWorld, updateElements, handleElementCreated]
   );
@@ -2675,6 +2681,51 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     },
     [updateElements]
   );
+
+  // Paste rich HTML (Notion, Docs, GitHub) or Markdown directly onto the canvas to drop a Markdown node
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable ||
+          target.closest('[data-testid="markdown-editor"]'))
+      ) {
+        return;
+      }
+      const html = e.clipboardData?.getData("text/html") ?? "";
+      const plain = e.clipboardData?.getData("text/plain") ?? "";
+      const md = resolveClipboardMarkdown(plain, html).trim();
+      if (!md) return;
+      e.preventDefault();
+      const id = uid("md");
+      const now = Date.now();
+      const firstHeading = /^#\s+(.+)$/m.exec(md)?.[1]?.trim();
+      const size = fitMarkdownNodeSize(md, { width: 320, height: 220 });
+      const created: JevElement = {
+        id,
+        kind: "markdown",
+        x: Math.round(viewportCenterWorld.x - size.width / 2),
+        y: Math.round(viewportCenterWorld.y - size.height / 2),
+        width: size.width,
+        height: size.height,
+        label: firstHeading ? firstHeading.slice(0, 80) : "Markdown Note",
+        sublabel: md,
+        tone: "ink",
+        seed: makeSeed(id),
+        createdAt: now,
+        updatedAt: now,
+      };
+      updateElements((prev) => [...prev, created]);
+      setSelectedIds([id]);
+      handleElementCreated(created);
+      showBoardNotice({ tone: "info", text: html ? "Pasted as Markdown note (formatting kept)" : "Pasted as Markdown note" });
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [viewportCenterWorld, updateElements, handleElementCreated, showBoardNotice]);
 
   // Global keyboard shortcuts (Tab + Enter predictions, /, tools, Undo/Redo)
   useEffect(() => {
@@ -3237,6 +3288,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   const showFirstRunEmptyState =
     boardReady &&
     elements.length === 0 &&
+    tool === "select" &&
     !joiningSharedRoom &&
     !thoughtPrompt.trim() &&
     !forkSession &&
@@ -3388,7 +3440,37 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
           </DropdownMenu>
           {boardFile.fileInput}
 
-          <span className="hidden h-4 w-px bg-border sm:block" aria-hidden="true" />
+          <span className="h-4 w-px bg-border" aria-hidden="true" />
+
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              data-testid="topbar-boards-btn"
+              onClick={() => {
+                boardPage.save();
+                setMyBoardsOpen(true);
+              }}
+              aria-label="My boards"
+              title="Open saved boards in this browser"
+              className="inline-flex min-h-[34px] items-center gap-1 rounded-xl px-2 py-1 text-xs font-semibold text-foreground/85 transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0"
+            >
+              <IconLayers className="h-3.5 w-3.5" aria-hidden="true" />
+              <span className="hidden sm:inline">Boards</span>
+            </button>
+            <button
+              type="button"
+              data-testid="topbar-new-board-btn"
+              onClick={() => boardPage.leave(newBoardPath)}
+              aria-label="New board"
+              title="Start a fresh board"
+              className="inline-flex min-h-[34px] items-center gap-1 rounded-xl bg-[#D94E28]/12 px-2 py-1 text-xs font-semibold text-[#C2411D] transition-colors hover:bg-[#D94E28] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-[#FF8562] dark:hover:text-white sm:min-h-0"
+            >
+              <IconPlus className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>New</span>
+            </button>
+          </div>
+
+          <span className="hidden h-4 w-px bg-border md:block" aria-hidden="true" />
 
           <input
             value={boardTitle}
@@ -3423,7 +3505,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
               });
             }}
             aria-label="Board title"
-            className="hidden w-32 rounded-md bg-transparent px-1 py-0.5 text-xs font-semibold text-foreground/90 outline-none focus:text-foreground focus-visible:ring-2 focus-visible:ring-ring sm:block"
+            className="hidden w-28 rounded-md bg-transparent px-1 py-0.5 text-xs font-semibold text-foreground/90 outline-none focus:text-foreground focus-visible:ring-2 focus-visible:ring-ring md:block"
           />
 
           <div className="hidden items-center gap-0.5 border-l border-border pl-1.5 lg:flex">

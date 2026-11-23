@@ -11,6 +11,7 @@ import {
 export const MAX_BOARD_ELEMENTS = 500;
 export const MAX_LABEL_LENGTH = 500;
 export const MAX_SUBLABEL_LENGTH = 500;
+export const MAX_MARKDOWN_LENGTH = 20_000;
 export const MAX_BOARD_TITLE_LENGTH = 120;
 export const MAX_FREEDRAW_POINTS = 2000;
 export const MAX_MORPH_SNAPSHOT_ELEMENTS = 48;
@@ -290,7 +291,7 @@ export const jevElementSchema: z.ZodType<JevElement> = z
     width: finiteCoordSchema,
     height: finiteCoordSchema,
     label: z.string().max(MAX_LABEL_LENGTH),
-    sublabel: z.string().max(MAX_SUBLABEL_LENGTH).optional(),
+    sublabel: z.string().max(MAX_MARKDOWN_LENGTH).optional(),
     tone: colorToneSchema,
     seed: z.number().finite(),
     fromId: safeIdSchema.optional(),
@@ -310,6 +311,10 @@ export const jevElementSchema: z.ZodType<JevElement> = z
     updatedBy: z.string().max(128).optional(),
     rev: z.number().int().min(0).max(1_000_000_000).optional(),
   })
+  .refine(
+    (el) => el.kind === "markdown" || (el.sublabel?.length ?? 0) <= MAX_SUBLABEL_LENGTH,
+    "Non-markdown sublabel exceeds maximum length"
+  )
   .refine(
     (el) => el.kind === "arrow" || (el.width >= 0 && el.height >= 0),
     "Non-arrow elements must have non-negative dimensions"

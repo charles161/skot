@@ -3,7 +3,7 @@
  * semantic-graph) build their enums from these arrays so a new kind cannot be
  * rendered locally but rejected on the wire.
  */
-export const BASE_SHAPE_KINDS = ["node", "diamond", "database", "ellipse", "frame", "text"] as const;
+export const BASE_SHAPE_KINDS = ["node", "diamond", "database", "ellipse", "frame", "text", "markdown"] as const;
 /**
  * HLD building blocks (Sensei feedback §2): queue, cache, LB/CDN, blob, external system, user/actor, zone/boundary,
  * and the note card (requirements, numbers, "breaks at 10×"; label = title, sublabel = one bullet per line).

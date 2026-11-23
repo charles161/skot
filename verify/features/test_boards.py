@@ -138,17 +138,24 @@ def test_board_link(page, app, prod_like, evidence, shot):
     page.wait_for_function("() => !location.search && !location.hash", timeout=10000)
 
     page.goto(prod_like + "/")
-    at_board(app, board)
-    page.wait_for_function(HAS, arg="Linked", timeout=20000)
+    page.wait_for_function("() => /\\/b\\//.test(location.pathname)", timeout=20000)
+    fresh = app.room_id()
+    assert fresh != board, "plain / must open a fresh board, not the previous room %s" % board
+    assert app.elements() == [], "plain / must start blank"
     assert page.evaluate(preview) == on_board
-    evidence.note(url=page.url, preview=on_board)
+    # Top-bar Boards & New buttons are directly visible and work.
+    assert page.get_by_test_id("topbar-boards-btn").is_visible()
+    assert page.get_by_test_id("topbar-new-board-btn").is_visible()
+    page.get_by_test_id("topbar-new-board-btn").click()
+    page.wait_for_function("prev => /\\/b\\//.test(location.pathname) && !location.pathname.endsWith('/' + prev)", arg=fresh, timeout=20000)
+    evidence.note(url=page.url, fresh=fresh, previous=board, preview=on_board)
     assert_no_console_errors(evidence)
 
 
 @check("board-migration")
 def test_board_migration(page, app, prod_like, evidence, shot):
     as_prod_left_it(page, prod_like)
-    page.goto(prod_like + "/")
+    page.goto("%s/b/%s" % (prod_like, old("latest")["id"]))
     at_board(app, old("latest")["id"])
     page.wait_for_function(HAS, arg="Card Network", timeout=20000)
 
@@ -188,7 +195,12 @@ def test_board_migration(page, app, prod_like, evidence, shot):
     assert len(saved(page, old("checkout")["id"])["elements"]) == len(old("checkout")["elements"]) + 1
     assert saved(page, old("checkout")["id"])["editedAt"]
     page.goto(prod_like + "/")
+    page.wait_for_function("() => /\\/b\\//.test(location.pathname)", timeout=20000)
+    assert app.room_id() != old("checkout")["id"], "plain / must open a fresh board, not the previous room"
+    # Checkout (edited last) is still preserved and appears right at the top of saved boards in My boards.
+    page.goto(prod_like + "/b/" + old("checkout")["id"])
     at_board(app, old("checkout")["id"])
+    page.wait_for_function(HAS, arg="After the Move", timeout=20000)
     evidence.note(boards=len(PROD["boards"]))
     assert_no_console_errors(evidence)
 
@@ -480,7 +492,65 @@ def test_board_replace_keeps(page, app, prod_like, evidence):
     assert_no_console_errors(evidence)
 
 
+@check("markdown-node")
+def test_markdown_node(page, app, prod_like, evidence, shot):
+    app.new_board()
+    # 1. Place a Markdown node via the dock tool and paste Notion-style HTML into the editor.
+    page.get_by_role("button", name=re.compile(r"Markdown tool")).click()
+    canvas = page.locator("[role=application]")
+    box = canvas.bounding_box()
+    page.mouse.click(box["x"] + box["width"] * 0.42, box["y"] + box["height"] * 0.45)
+
+    editor = page.get_by_test_id("markdown-editor")
+    editor.wait_for(state="visible", timeout=10000)
+    ta = editor.locator("textarea[aria-label='Markdown content']")
+    ta.focus()
+    notion_html = (
+        "<h1>Checkout Spec</h1>"
+        "<p>Enforce <strong>idempotency</strong> via <code>Idempotency-Key</code>.</p>"
+        "<ul><li><input type='checkbox' checked /> Verify signature</li>"
+        "<li><input type='checkbox' /> Load test p99</li></ul>"
+        "<table><thead><tr><th>Stage</th><th>SLA</th></tr></thead>"
+        "<tbody><tr><td>Auth</td><td>20ms</td></tr></tbody></table>"
+    )
+    ta.evaluate(
+        """(el, html) => {
+            const dt = new DataTransfer();
+            dt.setData("text/html", html);
+            dt.setData("text/plain", "Checkout Spec\\nEnforce idempotency via Idempotency-Key.");
+            el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+        }""",
+        notion_html,
+    )
+    page.wait_for_timeout(150)
+    assert "**idempotency**" in ta.input_value(), "Notion bold was not converted: %r" % ta.input_value()
+    assert "- [x] Verify signature" in ta.input_value(), "Notion checkbox was not converted"
+    assert "| Stage | SLA |" in ta.input_value(), "Notion table was not converted"
+    editor.get_by_role("button", name="Done").click()
+    editor.wait_for(state="hidden", timeout=10000)
+
+    node_view = page.locator("[data-testid^='markdown-node-']").first
+    node_view.wait_for(state="visible", timeout=10000)
+    rendered = node_view.inner_text()
+    assert "Checkout Spec" in rendered and "idempotency" in rendered and "Verify signature" in rendered
+    assert "Auth" in rendered and "20ms" in rendered
+    shot(page, "markdown-rendered")
+
+    # 2. Toggle an unchecked checkbox directly on the canvas and verify reload persistence.
+    unchecked = node_view.locator("button[aria-label='Mark task complete']").first
+    unchecked.click()
+    page.wait_for_timeout(800)
+    page.reload(wait_until="load")
+    node_view = page.locator("[data-testid^='markdown-node-']").first
+    node_view.wait_for(state="visible", timeout=20000)
+    assert node_view.locator("button[aria-label='Mark task incomplete']").count() == 2
+    shot(page, "markdown-after-toggle")
+    evidence.note(rendered=rendered[:200])
+    assert_no_console_errors(evidence)
+
+
 @check("board-names")
+
 def test_board_names(page, app, evidence, shot):
     app.new_board()
     type_node(app, "Checkout Service")

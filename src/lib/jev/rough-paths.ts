@@ -156,6 +156,14 @@ function hldParts(el: JevElement, kind: string, w: number, h: number): ShapePart
       if (l.titleHeight > 0) parts.push({ d: hline(l.titleHeight, 10, w - 10), fill: "none", strokeWidth: 1.1 });
       return parts;
     }
+    case "markdown": {
+      const r = 12;
+      const headerH = Math.min(34, Math.max(24, h * 0.25));
+      return [
+        { d: roundedRectPath(0, 0, w, h, r), fill: "fill" },
+        { d: hline(headerH, 10, w - 10), fill: "none", strokeWidth: 1 },
+      ];
+    }
     default:
       return null;
   }

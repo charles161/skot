@@ -47,6 +47,7 @@ const SHAPE_SEEDS: Record<ShapeKind, ShapeSeed> = {
   ellipse: { width: 152, height: 74, label: "User" },
   frame: { width: 340, height: 220, label: "System Zone" },
   text: { width: 180, height: 42, label: "Note" },
+  markdown: { width: 320, height: 220, label: "Markdown Note" },
   queue: { ...DEFAULT_KIND_SIZE.queue, label: "Queue" },
   cache: { ...DEFAULT_KIND_SIZE.cache, label: "Cache" },
   lb: { ...DEFAULT_KIND_SIZE.lb, label: "Load balancer" },

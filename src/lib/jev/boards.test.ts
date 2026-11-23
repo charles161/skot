@@ -103,8 +103,17 @@ describe("boards the live build saved keep working", () => {
     expect(byId.get(oldLink("blank").id)).toMatchObject({ edited: null, count: 0 });
   });
 
-  it("plain / opens the one edited last", () => {
-    expect(opened(prod())).toMatchObject({ roomId: oldLink("latest").id, createdNew: false });
+  it("plain / always opens a fresh new board, never an existing saved board", () => {
+    const storage = prod();
+    const first = opened(storage);
+    const second = opened(storage);
+    expect(first.createdNew).toBe(true);
+    expect(second.createdNew).toBe(true);
+    expect(first.roomId).not.toBe(oldLink("latest").id);
+    expect(second.roomId).not.toBe(first.roomId);
+    // Existing saved boards are untouched and still open via their exact /b/<id> path.
+    expect(listBoards(storage, NOW).map((b) => b.id)).not.toContain(first.roomId);
+    expect(opened(storage, { pathname: `/b/${oldLink("latest").id}` }).roomId).toBe(oldLink("latest").id);
   });
 
   it("an old link whose key was cut off still opens the board this browser has", () => {
@@ -139,7 +148,9 @@ describe("boards the live build saved keep working", () => {
     const storage = prod();
     const id = "futurebuild_AAAAAAAAAAAA";
     storage.map.set(boardStorageKey(id), board({ elements: [{ id: "x", kind: "from-a-newer-build" }], editedAt: NOW }));
-    expect(opened(storage).roomId).toBe(oldLink("latest").id);
+    const res = opened(storage);
+    expect(res.createdNew).toBe(true);
+    expect(res.roomId).not.toBe(id);
     expect(listBoards(storage, NOW).map((b) => b.id)).toContain(id);
   });
 
@@ -165,7 +176,7 @@ describe("boards the live build saved keep working", () => {
   it("a board saved before ids were 128-bit is neither hidden nor refused", () => {
     const storage = new MemoryStorage({ [boardStorageKey("jev-ab12")]: board() });
     expect(listBoards(storage, NOW).map((b) => b.id)).toEqual(["jev-ab12"]);
-    expect(opened(storage).url).toBe("/b/jev-ab12");
+    expect(opened(storage, { pathname: "/b/jev-ab12" }).url).toBe("/b/jev-ab12");
   });
 
   it("the time of the last edit written by this build beats what is guessed from the elements", () => {
@@ -205,10 +216,13 @@ describe("new boards", () => {
     expect(opened(storage, { pathname: first.url })).toEqual(first);
   });
 
-  it("visiting / again before editing does not make another", () => {
+  it("visiting / again opens an independent fresh room without polluting saved boards", () => {
     const storage = new MemoryStorage();
     const first = opened(storage);
-    expect(opened(storage).roomId).toBe(first.roomId);
+    const second = opened(storage);
+    expect(first.createdNew && second.createdNew).toBe(true);
+    expect(second.roomId).not.toBe(first.roomId);
+    expect(listBoards(storage, NOW)).toEqual([]);
   });
 
   it("/new always makes another, even with boards saved", () => {
@@ -325,6 +339,6 @@ describe("NEXT_PUBLIC_BASE_PATH", () => {
     expect(opened(prod(), { pathname: "/skot", hash }).url).toBe(`/skot/b/${id}`);
     expect(opened(prod(), { pathname: `/skot/b/${id}/` }).roomId).toBe(id);
     expect(opened(prod(), { pathname: "/skot/new" }).createdNew).toBe(true);
-    expect(opened(prod(), { pathname: "/skot/" }).roomId).toBe(oldLink("latest").id);
+    expect(opened(prod(), { pathname: "/skot/" }).createdNew).toBe(true);
   });
 });

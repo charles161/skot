@@ -6,6 +6,7 @@ import {
   MAX_BOARD_TITLE_LENGTH,
   MAX_FREEDRAW_POINTS,
   MAX_LABEL_LENGTH,
+  MAX_MARKDOWN_LENGTH,
   MAX_SUBLABEL_LENGTH,
   parseStoredBoardSnapshot,
   storedBoardSnapshotSchema,
@@ -34,11 +35,12 @@ export function exceedsBoardLimit(fromCount: number, toCount: number): boolean {
 const within = <T>(value: T, max: number): T =>
   typeof value === "string" && value.length > max ? (value.slice(0, max) as T) : value;
 
-function textWithinLimits<T extends { label: string; sublabel?: string }>(item: T): T {
+function textWithinLimits<T extends { kind?: string; label: string; sublabel?: string }>(item: T): T {
+  const maxSub = item.kind === "markdown" ? MAX_MARKDOWN_LENGTH : MAX_SUBLABEL_LENGTH;
   return {
     ...item,
     label: within(item.label, MAX_LABEL_LENGTH),
-    ...(item.sublabel !== undefined ? { sublabel: within(item.sublabel, MAX_SUBLABEL_LENGTH) } : {}),
+    ...(item.sublabel !== undefined ? { sublabel: within(item.sublabel, maxSub) } : {}),
   };
 }
 

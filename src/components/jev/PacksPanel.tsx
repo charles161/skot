@@ -8,6 +8,7 @@ import {
   IconDatabase,
   IconDiamond,
   IconFrame,
+  IconMarkdown,
   IconPacks,
   IconPlus,
   IconText,
@@ -26,6 +27,7 @@ export const PACK_ITEM_ICONS: Record<ShapeKind, IconComponent> = {
   ellipse: IconActor,
   frame: IconFrame,
   text: IconText,
+  markdown: IconMarkdown,
 };
 
 const DRAG_THRESHOLD = 6;

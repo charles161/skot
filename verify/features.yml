@@ -542,12 +542,20 @@ features:
 
   - id: board-link
     title: "Clean board link: /b/<id> with no query or hash, the secret kept in the browser, the same link preview
-      and CSP nonce as /, and plain / opens the board edited last"
+      and CSP nonce as /, plain / opens a fresh board, and top-bar Boards / New buttons work"
     check: board-link
     sources:
       - src/app/b/[id]/page.tsx
       - src/app/new/page.tsx
       - src/components/jev/use-board-page.ts
+
+  - id: markdown-node
+    title: "Markdown note node: place via dock or paste rich HTML from Notion, renders headings/bold/code/lists/tables/checkboxes, toggles checkboxes in place, and persists across reload"
+    check: markdown-node
+    sources:
+      - src/components/jev/MarkdownNodeView.tsx
+      - src/components/jev/MarkdownNodeEditor.tsx
+      - src/lib/jev/markdown.ts
 
   - id: board-migration
     title: "Boards saved by the build before /b/ (real storage from e7fe246): every old link opens the same room with
