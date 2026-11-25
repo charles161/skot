@@ -355,10 +355,17 @@ interface CachedElementBitmap {
 export class ElementBitmapCache {
   private map = new WeakMap<JevElement, CachedElementBitmap>();
   private generation = 0;
+  dragBackdropCanvas: HTMLCanvasElement | null = null;
+  dragBackdropKey = "";
 
   /** Invalidate all cached bitmaps (e.g. after web fonts finish loading). */
   invalidateAll(): void {
     this.generation += 1;
+    this.dragBackdropKey = "";
+  }
+
+  clearDragBackdrop(): void {
+    this.dragBackdropKey = "";
   }
 
   getOrCreateShape(
@@ -667,30 +674,22 @@ function isBoxVisible(
 /**
  * Excalidraw-grade StaticCanvas painter:
  * Clears once, draws pixel-locked dot grid, frustum-culls elements, and blits per-element cached offscreen canvases.
+ * During active drag/resize, caches all unaffected elements in an offscreen backdrop so pointermove only blits
+ * the 1 backdrop + the dragged element(s) and their directly connected arrows.
  */
 export function renderStaticScene(ctx: CanvasRenderingContext2D, st: StaticSceneState): void {
   const { width, height, dpr, viewport, theme, renderStyle, fonts, cache } = st;
   const paper = BOARD_PAPER[theme];
   const accentColor = theme === "midnight" ? "#F0643E" : "#D94E28";
 
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.fillStyle = paper;
-  ctx.fillRect(0, 0, width, height);
-
-  drawDotGrid(ctx, width, height, viewport, theme);
-
   const viewLeft = -viewport.x / viewport.zoom;
   const viewTop = -viewport.y / viewport.zoom;
   const viewRight = viewLeft + width / viewport.zoom;
   const viewBottom = viewTop + height / viewport.zoom;
 
-  ctx.save();
-  ctx.translate(viewport.x, viewport.y);
-  ctx.scale(viewport.zoom, viewport.zoom);
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = st.shouldCacheIgnoreZoom ? "low" : "high";
+  const isDragging = Boolean(st.dragOverrides && st.dragOverrides.size > 0);
 
-  const blitShape = (rawEl: JevElement) => {
+  const blitShapeTo = (targetCtx: CanvasRenderingContext2D, rawEl: JevElement) => {
     const ov = st.dragOverrides?.get(rawEl.id);
     const drawX = ov ? ov.x : rawEl.x;
     const drawY = ov ? ov.y : rawEl.y;
@@ -719,7 +718,7 @@ export function renderStaticScene(ctx: CanvasRenderingContext2D, st: StaticScene
       fonts,
     });
     if (!bmp) return;
-    ctx.drawImage(
+    targetCtx.drawImage(
       bmp.canvas,
       drawX - bmp.padLeft,
       drawY - bmp.padTop,
@@ -728,12 +727,8 @@ export function renderStaticScene(ctx: CanvasRenderingContext2D, st: StaticScene
     );
   };
 
-  // 1. Containers (frames, zones, fragments)
-  for (const el of st.frames) blitShape(el);
-
-  // 2. Arrows (build override lookup only if dragging)
   let effectiveMap = st.elementsById;
-  if (st.dragOverrides && st.dragOverrides.size > 0) {
+  if (isDragging && st.dragOverrides) {
     effectiveMap = new Map(st.elementsById);
     for (const [id, ov] of st.dragOverrides) {
       const base = effectiveMap.get(id);
@@ -741,13 +736,8 @@ export function renderStaticScene(ctx: CanvasRenderingContext2D, st: StaticScene
     }
   }
 
-  for (const arrow of st.arrows) {
-    const needsDynamicGeom =
-      st.dragOverrides &&
-      st.dragOverrides.size > 0 &&
-      ((arrow.fromId && st.dragOverrides.has(arrow.fromId)) ||
-        (arrow.toId && st.dragOverrides.has(arrow.toId)));
-    const geom = needsDynamicGeom
+  const drawArrowTo = (targetCtx: CanvasRenderingContext2D, arrow: JevElement, dynamic: boolean) => {
+    const geom = dynamic
       ? resolveArrowEndpoints(arrow, effectiveMap)
       : (st.arrowGeometries.get(arrow.id) ?? resolveArrowEndpoints(arrow, effectiveMap));
     const { start, end, control } = geom;
@@ -756,7 +746,7 @@ export function renderStaticScene(ctx: CanvasRenderingContext2D, st: StaticScene
     const maxX = Math.max(start.x, end.x, control.x);
     const maxY = Math.max(start.y, end.y, control.y);
     if (!isBoxVisible(minX, minY, maxX - minX, maxY - minY, viewLeft, viewTop, viewRight, viewBottom, 120)) {
-      continue;
+      return;
     }
 
     const pal = getTonePalette(arrow.tone, theme);
@@ -782,50 +772,144 @@ export function renderStaticScene(ctx: CanvasRenderingContext2D, st: StaticScene
     }
     const { markers, paths } = cachedArrow;
 
-    ctx.save();
-    if (isBeingReplaced) ctx.globalAlpha = st.forkActive ? 0.34 : 0.25;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
+    targetCtx.save();
+    if (isBeingReplaced) targetCtx.globalAlpha = st.forkActive ? 0.34 : 0.25;
+    targetCtx.lineCap = "round";
+    targetCtx.lineJoin = "round";
     for (const p of paths) {
       if (!p.d) continue;
-      ctx.strokeStyle = p.stroke;
-      ctx.lineWidth = isSelected ? 1.9 : (p.strokeWidth ?? 1.4);
-      if (arrow.dashed && arrowStyle === "clean") ctx.setLineDash([6, 5]);
-      else ctx.setLineDash([]);
-      ctx.stroke(getPath2D(p.d));
+      targetCtx.strokeStyle = p.stroke;
+      targetCtx.lineWidth = isSelected ? 1.9 : (p.strokeWidth ?? 1.4);
+      if (arrow.dashed && arrowStyle === "clean") targetCtx.setLineDash([6, 5]);
+      else targetCtx.setLineDash([]);
+      targetCtx.stroke(getPath2D(p.d));
     }
-    ctx.setLineDash([]);
-    drawArrowMarkers(ctx, markers.start, markers.end, stroke, paper, isSelected ? 1.85 : 1.45);
+    targetCtx.setLineDash([]);
+    drawArrowMarkers(targetCtx, markers.start, markers.end, stroke, paper, isSelected ? 1.85 : 1.45);
     if (arrow.label) {
-      const spot = !needsDynamicGeom ? st.labelSpots.get(arrow.id) : undefined;
+      const spot = !dynamic ? st.labelSpots.get(arrow.id) : undefined;
       const lx = spot?.x ?? 0.25 * start.x + 0.5 * control.x + 0.25 * end.x;
       const ly = spot?.y ?? 0.25 * start.y + 0.5 * control.y + 0.25 * end.y;
-      drawArrowPill(ctx, arrow.label, lx, ly, theme, stroke, pal.subtext, fonts.mono);
+      drawArrowPill(targetCtx, arrow.label, lx, ly, theme, stroke, pal.subtext, fonts.mono);
+    }
+    targetCtx.restore();
+  };
+
+  const drawFreedrawsTo = (targetCtx: CanvasRenderingContext2D) => {
+    for (const dr of st.freedraws) {
+      const bmp = cache.getOrCreateFreedraw(dr, {
+        theme,
+        accentColor,
+        isSelected: st.selectedSet.has(dr.id),
+        zoom: viewport.zoom,
+        dpr,
+        shouldCacheIgnoreZoom: st.shouldCacheIgnoreZoom,
+      });
+      if (!bmp) continue;
+      const worldX = -bmp.padLeft;
+      const worldY = -bmp.padTop;
+      if (!isBoxVisible(worldX, worldY, bmp.worldWidth, bmp.worldHeight, viewLeft, viewTop, viewRight, viewBottom)) {
+        continue;
+      }
+      targetCtx.drawImage(bmp.canvas, worldX, worldY, bmp.worldWidth, bmp.worldHeight);
+    }
+  };
+
+  if (isDragging && st.dragOverrides && typeof document !== "undefined") {
+    const moving = st.dragOverrides;
+    const isMovingArrow = (a: JevElement) =>
+      Boolean((a.fromId && moving.has(a.fromId)) || (a.toId && moving.has(a.toId)));
+
+    const pw = Math.max(1, Math.round(width * dpr));
+    const ph = Math.max(1, Math.round(height * dpr));
+    const movingKey = Array.from(moving.keys()).sort().join(",");
+    const selectedKey = Array.from(st.selectedSet).sort().join(",");
+    const backdropKey = `${pw}x${ph}|${viewport.x.toFixed(2)},${viewport.y.toFixed(2)},${viewport.zoom.toFixed(4)}|${theme}|${renderStyle}|${st.editingId ?? ""}|${st.forkActive ? 1 : 0}|${st.frames.length}:${st.arrows.length}:${st.shapes.length}|${selectedKey}|${movingKey}`;
+
+    if (!cache.dragBackdropCanvas) {
+      cache.dragBackdropCanvas = document.createElement("canvas");
+    }
+    const backdrop = cache.dragBackdropCanvas;
+    if (backdrop.width !== pw) backdrop.width = pw;
+    if (backdrop.height !== ph) backdrop.height = ph;
+
+    if (cache.dragBackdropKey !== backdropKey) {
+      const bctx = backdrop.getContext("2d", { alpha: false });
+      if (bctx) {
+        bctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        bctx.fillStyle = paper;
+        bctx.fillRect(0, 0, width, height);
+        drawDotGrid(bctx, width, height, viewport, theme);
+
+        bctx.save();
+        bctx.translate(viewport.x, viewport.y);
+        bctx.scale(viewport.zoom, viewport.zoom);
+        bctx.imageSmoothingEnabled = true;
+        bctx.imageSmoothingQuality = "high";
+        for (const el of st.frames) {
+          if (!moving.has(el.id)) blitShapeTo(bctx, el);
+        }
+        for (const arrow of st.arrows) {
+          if (!isMovingArrow(arrow)) drawArrowTo(bctx, arrow, false);
+        }
+        drawFreedrawsTo(bctx);
+        for (const el of st.shapes) {
+          if (!moving.has(el.id)) blitShapeTo(bctx, el);
+        }
+        bctx.restore();
+        cache.dragBackdropKey = backdropKey;
+      }
+    }
+
+    // 1-call pixel-aligned blit of all unaffected elements + dot grid
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(backdrop, 0, 0);
+
+    // Draw ONLY the moving elements and their attached arrows
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.save();
+    ctx.translate(viewport.x, viewport.y);
+    ctx.scale(viewport.zoom, viewport.zoom);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "low";
+    for (const el of st.frames) {
+      if (moving.has(el.id)) blitShapeTo(ctx, el);
+    }
+    for (const arrow of st.arrows) {
+      if (isMovingArrow(arrow)) drawArrowTo(ctx, arrow, true);
+    }
+    for (const el of st.shapes) {
+      if (moving.has(el.id)) blitShapeTo(ctx, el);
     }
     ctx.restore();
+    return;
   }
+
+  cache.clearDragBackdrop();
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = paper;
+  ctx.fillRect(0, 0, width, height);
+
+  drawDotGrid(ctx, width, height, viewport, theme);
+
+  ctx.save();
+  ctx.translate(viewport.x, viewport.y);
+  ctx.scale(viewport.zoom, viewport.zoom);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = st.shouldCacheIgnoreZoom ? "low" : "high";
+
+  // 1. Containers (frames, zones, fragments)
+  for (const el of st.frames) blitShapeTo(ctx, el);
+
+  // 2. Arrows
+  for (const arrow of st.arrows) drawArrowTo(ctx, arrow, false);
 
   // 3. Freedraw strokes
-  for (const dr of st.freedraws) {
-    const bmp = cache.getOrCreateFreedraw(dr, {
-      theme,
-      accentColor,
-      isSelected: st.selectedSet.has(dr.id),
-      zoom: viewport.zoom,
-      dpr,
-      shouldCacheIgnoreZoom: st.shouldCacheIgnoreZoom,
-    });
-    if (!bmp) continue;
-    const worldX = -bmp.padLeft;
-    const worldY = -bmp.padTop;
-    if (!isBoxVisible(worldX, worldY, bmp.worldWidth, bmp.worldHeight, viewLeft, viewTop, viewRight, viewBottom)) {
-      continue;
-    }
-    ctx.drawImage(bmp.canvas, worldX, worldY, bmp.worldWidth, bmp.worldHeight);
-  }
+  drawFreedrawsTo(ctx);
 
   // 4. Shapes
-  for (const el of st.shapes) blitShape(el);
+  for (const el of st.shapes) blitShapeTo(ctx, el);
 
   ctx.restore();
 }

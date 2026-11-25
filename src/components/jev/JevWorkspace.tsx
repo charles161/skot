@@ -707,11 +707,22 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       if (!bounds || typeof window === "undefined") return;
       // A phone has no room for desktop gutters, and its dock (one chip row and the bar) is short.
       const phone = opts.keepBoard && window.innerWidth < 640;
+      const phoneTop = phone
+        ? Math.max(
+            180,
+            Math.ceil(
+              Array.from(document.querySelectorAll('button[aria-label*=" tool ("]')).reduce(
+                (max, el) => Math.max(max, el.getBoundingClientRect().bottom),
+                0
+              )
+            ) + 12
+          )
+        : margins?.top;
       const fit = {
         screenWidth: window.innerWidth,
         screenHeight: window.innerHeight,
-        // On a phone the header and the toolbar are two rows: the newest node stays below both.
-        margins: phone ? { ...margins, top: 124, left: 16, right: 16, bottom: 150 } : margins,
+        // On a phone keep the newest node cleanly below the stacked header + toolbar rows.
+        margins: phone ? { ...margins, top: phoneTop, left: 16, right: 16, bottom: 150 } : margins,
       };
       // keepBoard: a growing diagram zooms out to stay whole instead of scrolling its first nodes away. A phone
       // keeps its zoom and pans to the new node.

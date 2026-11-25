@@ -255,9 +255,14 @@ export const JevCanvas = React.memo(function JevCanvas({
     return ghosts.length > 0 ? layoutArrowLabels([...elements, ...ghosts], ghostElementsMap) : null;
   }, [elements, activePrediction, ghostElementsMap]);
 
+  const removedGhostKey = useMemo(
+    () => (activePrediction?.removeIds?.length ? activePrediction.removeIds.join(",") : ""),
+    [activePrediction]
+  );
+
   const removedGhostSet = useMemo(
     () => new Set(activePrediction?.removeIds ?? []),
-    [activePrediction]
+    [removedGhostKey] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const { frames, arrows, freedraws, shapes, markdownNodes } = useMemo(() => {
@@ -333,6 +338,13 @@ export const JevCanvas = React.memo(function JevCanvas({
   const paintRafRef = useRef<number | null>(null);
 
   const syncDomViewportMeta = useCallback((vp: Viewport) => {
+    const container = containerRef.current;
+    if (container) {
+      const nextAttr = `${vp.x},${vp.y},${vp.zoom}`;
+      if (container.getAttribute("data-viewport") !== nextAttr) {
+        container.setAttribute("data-viewport", nextAttr);
+      }
+    }
     const mdLayer = markdownLayerRef.current;
     if (mdLayer) {
       mdLayer.style.transform = `translate3d(${vp.x}px, ${vp.y}px, 0) scale(${vp.zoom})`;
@@ -480,15 +492,28 @@ export const JevCanvas = React.memo(function JevCanvas({
     };
   }, [schedulePaint]);
 
-  // Repaint static + interactive canvases when React scene props change
+  // Repaint StaticCanvas ONLY when static board content/styling changes (never on Thought Bar typing / ghost / peer / tool changes)
   useEffect(() => {
-    schedulePaint(true, true);
+    schedulePaint(true, false);
   }, [
     elements,
     selectedIds,
     theme,
     renderStyle,
     editingId,
+    forkActive,
+    removedGhostKey,
+    schedulePaint,
+  ]);
+
+  // Repaint InteractiveCanvas when ghosts, selection overlays, peers, or tool change
+  useEffect(() => {
+    schedulePaint(false, true);
+  }, [
+    elements,
+    selectedIds,
+    theme,
+    renderStyle,
     forkActive,
     activePrediction,
     peers,
@@ -1578,7 +1603,7 @@ export const JevCanvas = React.memo(function JevCanvas({
 
   const labelFontClass = renderStyle === "sketch" ? "font-sketch" : "font-sans";
   const editingElement = editingId ? elementsById.get(editingId) : null;
-  const activeVp = liveViewportRef.current;
+  const activeVp = viewportDirtyRef.current ? liveViewportRef.current : viewport;
 
   return (
     <div

@@ -7,9 +7,9 @@ export const ZOOM_STEP_OUT = 1 / ZOOM_STEP_IN;
 
 /** Chromium synthesizes trackpad pinch as ctrl+wheel where native scale = exp(-deltaY / 100). */
 const PINCH_SENSITIVITY = 0.01;
-/** Discrete mouse Ctrl/Cmd+wheel (~100px per notch -> ~28% zoom step). */
-const WHEEL_ZOOM_SENSITIVITY = 0.0025;
-const WHEEL_DELTA_CLAMP = 120;
+/** Discrete mouse Ctrl/Cmd+wheel (~100px per notch -> ~17% smooth zoom step). */
+const WHEEL_ZOOM_SENSITIVITY = 0.0016;
+const WHEEL_DELTA_CLAMP = 100;
 
 export const clampZoom = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
 
