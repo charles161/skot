@@ -3294,6 +3294,12 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     !forkSession &&
     !aiQuiet;
 
+  const handleCanvasInteractingChange = useCallback((active: boolean) => {
+    if (active) thoughtInputRef.current?.blur();
+    setCanvasInteracting(active);
+    selectionTriggerRef.current?.setBusy(active);
+  }, []);
+
   if (missingBoard) return <MissingBoard board={missingBoard} />;
   if (unreadableSave !== null) return <UnreadableBoard raw={unreadableSave} />;
 
@@ -3341,11 +3347,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         onStrokeCreated={handleStrokeCreated}
         onElementLabelEdited={handleElementLabelEdited}
         onCursorMove={handleCursorMove}
-        onInteractingChange={(active) => {
-          if (active) thoughtInputRef.current?.blur();
-          setCanvasInteracting(active);
-          selectionTriggerRef.current?.setBusy(active);
-        }}
+        onInteractingChange={handleCanvasInteractingChange}
       />
 
       <MoveOverlay
@@ -4004,6 +4006,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
           onClick={() => fitToView()}
           aria-label={`Zoom ${Math.round(viewport.zoom * 100)} percent. Fit diagram to viewport`}
           title="Fit diagram to viewport"
+          data-skot-zoom-pct="1"
           className="min-w-[48px] rounded-lg px-1.5 py-1 font-mono text-[11px] font-medium text-foreground/85 transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {Math.round(viewport.zoom * 100)}%

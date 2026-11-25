@@ -170,7 +170,7 @@ const ShapePathsMemo = React.memo(function ShapePathsMemo({
 });
 
 /** Self-laid-out shape text (entity rows, class compartments, fragment guards, zone label). */
-function ShapeGlyphText({
+const ShapeGlyphText = React.memo(function ShapeGlyphText({
   glyphs,
   pal,
   labelFontClass,
@@ -217,13 +217,13 @@ function ShapeGlyphText({
       ))}
     </g>
   );
-}
+});
 
 function markerFill(fill: MarkerFill, stroke: string, paper: string): string {
   return fill === "stroke" ? stroke : fill === "paper" ? paper : "none";
 }
 
-function ArrowMarkerPaths({
+const ArrowMarkerPaths = React.memo(function ArrowMarkerPaths({
   start,
   end,
   stroke,
@@ -261,9 +261,140 @@ function ArrowMarkerPaths({
       )}
     </>
   );
-}
+});
 
-export function JevCanvas({
+const ArrowElementMemo = React.memo(function ArrowElementMemo({
+  arrow,
+  geometry,
+  labelSpot,
+  theme,
+  paper,
+  accentColor,
+  renderStyle,
+  isSelected,
+  isBeingReplaced,
+  forkActive,
+  onDoubleClickArrow,
+}: {
+  arrow: JevElement;
+  geometry: ArrowGeometry;
+  labelSpot?: Point;
+  theme: BoardTheme;
+  paper: string;
+  accentColor: string;
+  renderStyle: RenderStyle;
+  isSelected: boolean;
+  isBeingReplaced: boolean;
+  forkActive: boolean;
+  onDoubleClickArrow: (arrow: JevElement) => void;
+}) {
+  const pal = getTonePalette(arrow.tone, theme);
+  const { start, end, control } = geometry;
+  const stroke = isSelected ? accentColor : pal.stroke;
+  const arrowStyle = resolveRenderStyle(arrow, renderStyle);
+  const { markers, paths } = useMemo(() => {
+    const resolved = resolveArrowMarkers(arrow, { start, control, end });
+    const generated = generateArrowPath(
+      resolved.lineStart,
+      control,
+      resolved.lineEnd,
+      arrow.seed,
+      stroke,
+      arrowStyle,
+      arrow.dashed
+    );
+    return { markers: resolved, paths: generated };
+  }, [arrow, start, control, end, stroke, arrowStyle]);
+
+  const labelX = labelSpot?.x ?? 0.25 * start.x + 0.5 * control.x + 0.25 * end.x;
+  const labelY = labelSpot?.y ?? 0.25 * start.y + 0.5 * control.y + 0.25 * end.y;
+
+  return (
+    <g
+      data-element-id={arrow.id}
+      data-kind="arrow"
+      opacity={isBeingReplaced ? (forkActive ? 0.34 : 0.25) : 1}
+      onDoubleClick={(ev) => {
+        ev.stopPropagation();
+        onDoubleClickArrow(arrow);
+      }}
+    >
+      {paths.map((p, idx) => (
+        <path
+          key={idx}
+          d={p.d}
+          stroke={p.stroke}
+          strokeWidth={isSelected ? 1.9 : p.strokeWidth}
+          fill="none"
+          strokeLinecap="round"
+          strokeDasharray={arrow.dashed && arrowStyle === "clean" ? "6 5" : undefined}
+        />
+      ))}
+      <ArrowMarkerPaths
+        start={markers.start}
+        end={markers.end}
+        stroke={stroke}
+        paper={paper}
+        strokeWidth={isSelected ? 1.85 : 1.45}
+      />
+      {arrow.label && (
+        <g transform={`translate(${labelX}, ${labelY})`}>
+          <rect
+            x={-(arrow.label.length * 3.6 + 9)}
+            y={-11}
+            width={arrow.label.length * 7.2 + 18}
+            height={20}
+            rx={6}
+            fill={theme === "midnight" ? "#151A24" : "#FAF8F2"}
+            stroke={stroke}
+            strokeOpacity={0.2}
+            strokeWidth={1}
+          />
+          <text
+            x={0}
+            y={3}
+            textAnchor="middle"
+            fill={pal.subtext}
+            className="font-mono text-[10.5px] font-medium"
+          >
+            {arrow.label}
+          </text>
+        </g>
+      )}
+    </g>
+  );
+});
+
+const FreedrawElementMemo = React.memo(function FreedrawElementMemo({
+  dr,
+  theme,
+  accentColor,
+  isSelected,
+}: {
+  dr: JevElement;
+  theme: BoardTheme;
+  accentColor: string;
+  isSelected: boolean;
+}) {
+  const pal = getTonePalette(dr.tone, theme);
+  const d = useMemo(
+    () => (dr.points && dr.points.length >= 2 ? smoothFreedrawPath(dr.points) : null),
+    [dr.points]
+  );
+  if (!d) return null;
+  return (
+    <path
+      d={d}
+      stroke={isSelected ? accentColor : pal.stroke}
+      strokeWidth={2.4}
+      fill="none"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  );
+});
+
+export const JevCanvas = React.memo(function JevCanvas({
   svgRef,
   startEditRef,
   remoteSyncGenerationRef,
@@ -288,6 +419,96 @@ export function JevCanvas({
   onInteractingChange,
 }: JevCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const canvasLayerRef = useRef<HTMLDivElement | null>(null);
+  const worldGroupRef = useRef<SVGGElement | null>(null);
+  const committedViewportRef = useRef<Viewport>(viewport);
+  const liveViewportRef = useRef<Viewport>(viewport);
+  const onViewportChangeRef = useRef(onViewportChange);
+  onViewportChangeRef.current = onViewportChange;
+  const viewportDirtyRef = useRef(false);
+  const viewportRafRef = useRef<number | null>(null);
+  const viewportCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const containerRectRef = useRef<{ left: number; top: number; ts: number } | null>(null);
+
+  const applyLiveViewportDOM = useCallback((v: Viewport, useCompositorPreview: boolean) => {
+    const layer = canvasLayerRef.current;
+    const g = worldGroupRef.current;
+    if (useCompositorPreview && layer) {
+      // Pure GPU compositor transform against committed SVG <g>: zero Blink layout/text mutations during pinch/pan
+      const base = committedViewportRef.current;
+      const scale = v.zoom / base.zoom;
+      const tx = v.x - base.x * scale;
+      const ty = v.y - base.y * scale;
+      layer.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${scale})`;
+      return;
+    }
+    if (layer) layer.style.transform = "";
+    if (g) g.setAttribute("transform", `translate(${v.x}, ${v.y}) scale(${v.zoom})`);
+    committedViewportRef.current = v;
+    const el = containerRef.current;
+    if (el) {
+      const gs = 28 * v.zoom;
+      const ox = ((v.x % gs) + gs) % gs;
+      const oy = ((v.y % gs) + gs) % gs;
+      el.style.backgroundSize = `${gs}px ${gs}px`;
+      el.style.backgroundPosition = `${ox}px ${oy}px`;
+    }
+  }, []);
+
+  const flushViewportToReact = useCallback(() => {
+    if (viewportCommitTimerRef.current !== null) {
+      clearTimeout(viewportCommitTimerRef.current);
+      viewportCommitTimerRef.current = null;
+    }
+    if (viewportRafRef.current !== null) {
+      window.cancelAnimationFrame(viewportRafRef.current);
+      viewportRafRef.current = null;
+    }
+    if (!viewportDirtyRef.current) return;
+    viewportDirtyRef.current = false;
+    const finalVp = { ...liveViewportRef.current };
+    applyLiveViewportDOM(finalVp, false);
+    onViewportChangeRef.current(finalVp);
+  }, [applyLiveViewportDOM]);
+
+  const scheduleLiveViewport = useCallback(
+    (next: Viewport, commitDelayMs: number) => {
+      liveViewportRef.current = next;
+      viewportDirtyRef.current = true;
+      if (viewportRafRef.current === null) {
+        viewportRafRef.current = window.requestAnimationFrame(() => {
+          viewportRafRef.current = null;
+          applyLiveViewportDOM(liveViewportRef.current, true);
+        });
+      }
+      if (viewportCommitTimerRef.current !== null) {
+        clearTimeout(viewportCommitTimerRef.current);
+        viewportCommitTimerRef.current = null;
+      }
+      if (commitDelayMs > 0) {
+        viewportCommitTimerRef.current = setTimeout(() => {
+          viewportCommitTimerRef.current = null;
+          flushViewportToReact();
+        }, commitDelayMs);
+      }
+    },
+    [applyLiveViewportDOM, flushViewportToReact]
+  );
+
+  // Sync external viewport updates (Fit-to-view, Fork auto-fit, +/- buttons) when no live gesture owns the DOM
+  useEffect(() => {
+    if (!viewportDirtyRef.current) {
+      liveViewportRef.current = viewport;
+      applyLiveViewportDOM(viewport, false);
+    }
+  }, [viewport, applyLiveViewportDOM]);
+
+  useEffect(() => {
+    return () => {
+      if (viewportRafRef.current !== null) window.cancelAnimationFrame(viewportRafRef.current);
+      if (viewportCommitTimerRef.current !== null) clearTimeout(viewportCommitTimerRef.current);
+    };
+  }, []);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [editState, setEditState] = useState<{
@@ -378,17 +599,15 @@ export function JevCanvas({
     [activePrediction]
   );
 
-  const screenToWorld = useCallback(
-    (clientX: number, clientY: number): Point => {
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect) return { x: clientX, y: clientY };
-      return {
-        x: (clientX - rect.left - viewport.x) / viewport.zoom,
-        y: (clientY - rect.top - viewport.y) / viewport.zoom,
-      };
-    },
-    [viewport]
-  );
+  const screenToWorld = useCallback((clientX: number, clientY: number): Point => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    const vp = liveViewportRef.current;
+    if (!rect) return { x: clientX, y: clientY };
+    return {
+      x: (clientX - rect.left - vp.x) / vp.zoom,
+      y: (clientY - rect.top - vp.y) / vp.zoom,
+    };
+  }, []);
 
   // Track Spacebar for quick Hand panning
   useEffect(() => {
@@ -414,15 +633,10 @@ export function JevCanvas({
 
   const findShapeAtPoint = useCallback(
     (pt: Point, ignoreId?: string): JevElement | null => {
-      // Search top-most first, preferring non-containers over containers
-      const nonFrames = elements.filter(
-        (e) =>
-          e.id !== ignoreId &&
-          isShapeElement(e) &&
-          !isContainerKind(e.kind)
-      );
-      for (let i = nonFrames.length - 1; i >= 0; i--) {
-        const el = nonFrames[i];
+      // Search top-most first, preferring non-containers over containers (zero intermediate array allocations)
+      for (let i = elements.length - 1; i >= 0; i--) {
+        const el = elements[i];
+        if (el.id === ignoreId || !isShapeElement(el) || isContainerKind(el.kind)) continue;
         if (
           pt.x >= el.x - 4 &&
           pt.x <= el.x + el.width + 4 &&
@@ -433,34 +647,25 @@ export function JevCanvas({
         }
       }
       // Check arrows
-      const arrows = elements.filter(
-        (e) => e.id !== ignoreId && e.kind === "arrow"
-      );
-      for (let i = arrows.length - 1; i >= 0; i--) {
-        const arr = arrows[i];
+      for (let i = elements.length - 1; i >= 0; i--) {
+        const arr = elements[i];
+        if (arr.id === ignoreId || arr.kind !== "arrow") continue;
         if (pointToArrowDistance(pt, arrowGeometry(arr)) < 12) {
           return arr;
         }
       }
       // Check freedraw
-      const draws = elements.filter(
-        (e) => e.id !== ignoreId && e.kind === "freedraw" && e.points
-      );
-      for (let i = draws.length - 1; i >= 0; i--) {
-        const dr = draws[i];
-        if (
-          dr.points?.some((p) => distanceBetween(p, pt) < 14)
-        ) {
+      for (let i = elements.length - 1; i >= 0; i--) {
+        const dr = elements[i];
+        if (dr.id === ignoreId || dr.kind !== "freedraw" || !dr.points) continue;
+        if (dr.points.some((p) => distanceBetween(p, pt) < 14)) {
           return dr;
         }
       }
       // Check containers (frame, zone, fragment) last
-      const frames = elements.filter(
-        (e) => e.id !== ignoreId && isContainerKind(e.kind)
-      );
-      for (let i = frames.length - 1; i >= 0; i--) {
-        const f = frames[i];
-        // Frame hit on border or title bar
+      for (let i = elements.length - 1; i >= 0; i--) {
+        const f = elements[i];
+        if (f.id === ignoreId || !isContainerKind(f.kind)) continue;
         const inOuter =
           pt.x >= f.x - 6 &&
           pt.x <= f.x + f.width + 6 &&
@@ -584,30 +789,42 @@ export function JevCanvas({
     [elements, onElementsChange, onSelectIds, startEdit]
   );
 
-  const handleWheel = useCallback(
-    (e: WheelEvent) => {
+  // Single stable wheel listener: reads liveViewportRef (zero stale-closure loss, zero listener churn, zero React commits per tick)
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+    const handleWheel = (e: WheelEvent) => {
       const target = e.target as HTMLElement | null;
       if (target?.closest('[data-testid="markdown-editor"]')) return;
       const mdScroll = target?.closest('[data-markdown-scroll="1"]') as HTMLElement | null;
       if (mdScroll && mdScroll.scrollHeight > mdScroll.clientHeight) return;
       e.preventDefault();
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      onViewportChange(
-        wheelViewport(viewport, e, { x: e.clientX - rect.left, y: e.clientY - rect.top })
-      );
-    },
-    [viewport, onViewportChange]
-  );
-
-  useEffect(() => {
-    const node = containerRef.current;
-    if (!node) return;
+      const now = performance.now();
+      let cached = containerRectRef.current;
+      if (!cached || now - cached.ts > 250) {
+        const rect = node.getBoundingClientRect();
+        cached = { left: rect.left, top: rect.top, ts: now };
+        containerRectRef.current = cached;
+      }
+      const next = wheelViewport(liveViewportRef.current, e, {
+        x: e.clientX - cached.left,
+        y: e.clientY - cached.top,
+      });
+      scheduleLiveViewport(next, 64);
+    };
+    const invalidateRect = () => {
+      containerRectRef.current = null;
+    };
     node.addEventListener("wheel", handleWheel, { passive: false });
-    return () => node.removeEventListener("wheel", handleWheel);
-  }, [handleWheel]);
+    window.addEventListener("resize", invalidateRect);
+    return () => {
+      node.removeEventListener("wheel", handleWheel);
+      window.removeEventListener("resize", invalidateRect);
+    };
+  }, [scheduleLiveViewport]);
 
   const handlePointerDown = (e: React.PointerEvent) => {
+    if (viewportDirtyRef.current) flushViewportToReact();
     if (editingId) {
       if (elementsById.get(editingId)?.kind === "markdown" && markdownCommitRef.current) {
         markdownCommitRef.current();
@@ -618,6 +835,7 @@ export function JevCanvas({
 
     const world = screenToWorld(e.clientX, e.clientY);
     const screen = { x: e.clientX, y: e.clientY };
+    const currentViewport = liveViewportRef.current;
 
     // Middle mouse or Hand tool or Spacebar => Pan
     if (e.button === 1 || tool === "hand" || spacePressed) {
@@ -626,7 +844,7 @@ export function JevCanvas({
         mode: "pan",
         startScreen: screen,
         startWorld: world,
-        startViewport: { ...viewport },
+        startViewport: { ...currentViewport },
         currentWorld: world,
       });
       return;
@@ -755,21 +973,25 @@ export function JevCanvas({
     onCursorMove?.(world);
 
     if (!drag) {
-      const hovered = hoveredId ? elements.find((el) => el.id === hoveredId) : undefined;
+      const hovered = hoveredId ? elementsById.get(hoveredId) : undefined;
       if (hovered && isShapeElement(hovered) && hovered.kind !== "text" && pointOnEdgeHandle(hovered, world)) return;
       const hit = findShapeAtPoint(world);
-      setHoveredId(hit?.id ?? null);
+      const nextHovered = hit?.id ?? null;
+      setHoveredId((prev) => (prev === nextHovered ? prev : nextHovered));
       return;
     }
 
     if (drag.mode === "pan") {
       const dx = e.clientX - drag.startScreen.x;
       const dy = e.clientY - drag.startScreen.y;
-      onViewportChange({
-        ...drag.startViewport,
-        x: drag.startViewport.x + dx,
-        y: drag.startViewport.y + dy,
-      });
+      scheduleLiveViewport(
+        {
+          ...drag.startViewport,
+          x: drag.startViewport.x + dx,
+          y: drag.startViewport.y + dy,
+        },
+        0
+      );
       return;
     }
 
@@ -920,6 +1142,9 @@ export function JevCanvas({
 
   const handlePointerUp = () => {
     if (!drag) return;
+    if (drag.mode === "pan") {
+      flushViewportToReact();
+    }
     setSnapGuides([]);
     const currentSyncGen = remoteSyncGenerationRef?.current ?? 0;
     const remoteChangedMidDrag =
@@ -1173,19 +1398,30 @@ export function JevCanvas({
     });
   };
 
-  const startDoubleClickEdit = (el: JevElement, ev?: React.MouseEvent) => {
-    const field = ev ? pickEditField(el, screenToWorld(ev.clientX, ev.clientY)) : "label";
-    const session = beginLabelEdit(el, field);
-    if (!session) return;
-    onSelectIds([el.id]);
-    startEdit(session);
-  };
+  const startDoubleClickEdit = useCallback(
+    (el: JevElement, ev?: React.MouseEvent) => {
+      if (viewportDirtyRef.current) flushViewportToReact();
+      const field = ev ? pickEditField(el, screenToWorld(ev.clientX, ev.clientY)) : "label";
+      const session = beginLabelEdit(el, field);
+      if (!session) return;
+      onSelectIds([el.id]);
+      startEdit(session);
+    },
+    [flushViewportToReact, onSelectIds, screenToWorld, startEdit]
+  );
 
   const handleCanvasDoubleClick = (e: React.MouseEvent) => {
     if (tool !== "select" || editState) return;
     const target = e.target as HTMLElement | null;
     if (target?.closest("input, textarea, button, [role='dialog']")) return;
-    createTextAtWorld(screenToWorld(e.clientX, e.clientY));
+    if (viewportDirtyRef.current) flushViewportToReact();
+    const world = screenToWorld(e.clientX, e.clientY);
+    const hit = findShapeAtPoint(world);
+    if (hit && hit.kind !== "freedraw") {
+      startDoubleClickEdit(hit, e);
+      return;
+    }
+    createTextAtWorld(world);
   };
 
   const ghostStroke = theme === "midnight" ? "#38BDF8" : "#2563EB";
@@ -1198,13 +1434,20 @@ export function JevCanvas({
 
   const paper = BOARD_PAPER[theme];
 
-  // Sort layers cleanly: containers -> arrows -> freedraw -> shapes
-  const frames = elements.filter((e) => isContainerKind(e.kind));
-  const arrows = elements.filter((e) => e.kind === "arrow");
-  const freedraws = elements.filter((e) => e.kind === "freedraw");
-  const shapes = elements.filter(
-    (e) => isShapeElement(e) && !isContainerKind(e.kind)
-  );
+  // Sort layers cleanly: containers -> arrows -> freedraw -> shapes (memoized)
+  const { frames, arrows, freedraws, shapes } = useMemo(() => {
+    const f: JevElement[] = [];
+    const a: JevElement[] = [];
+    const d: JevElement[] = [];
+    const s: JevElement[] = [];
+    for (const e of elements) {
+      if (isContainerKind(e.kind)) f.push(e);
+      else if (e.kind === "arrow") a.push(e);
+      else if (e.kind === "freedraw") d.push(e);
+      else if (isShapeElement(e)) s.push(e);
+    }
+    return { frames: f, arrows: a, freedraws: d, shapes: s };
+  }, [elements]);
 
   // Active ghost elements: the highlighted option of the top-3 panel
   const ghostItems: JevElement[] = activePrediction?.addElements ?? [];
@@ -1249,19 +1492,24 @@ export function JevCanvas({
       style={{
         touchAction: "none",
         backgroundColor: "var(--jev-paper)",
-        backgroundImage: `radial-gradient(circle, var(--jev-grid-dot) ${Math.max(0.8, Math.min(1.5, viewport.zoom * 1.15))}px, transparent 1px)`,
+        backgroundImage: "radial-gradient(circle, var(--jev-grid-dot) 1.1px, transparent 1px)",
         backgroundSize: `${gridSpacing}px ${gridSpacing}px`,
         backgroundPosition: `${gridOffsetX}px ${gridOffsetY}px`,
       }}
     >
-      <svg
-        ref={svgRef}
-        aria-hidden="true"
-        className="h-full w-full touch-none overflow-visible"
-        textRendering="geometricPrecision"
-        xmlns="http://www.w3.org/2000/svg"
+      <div
+        ref={canvasLayerRef}
+        className="h-full w-full"
+        style={{ transformOrigin: "0 0", willChange: "transform", contain: "layout style" }}
       >
-        <g transform={`translate(${viewport.x}, ${viewport.y}) scale(${viewport.zoom})`}>
+        <svg
+          ref={svgRef}
+          aria-hidden="true"
+          className="h-full w-full touch-none overflow-visible"
+          textRendering="geometricPrecision"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <g ref={worldGroupRef} transform={`translate(${viewport.x}, ${viewport.y}) scale(${viewport.zoom})`}>
           {/* 1. CONTAINERS (frames, zones, fragments) */}
           {frames.map((el) => {
             const pal = getTonePalette(el.tone, theme);
@@ -1349,105 +1597,34 @@ export function JevCanvas({
             )
           )}
 
-          {/* 4. ARROWS */}
-          {arrows.map((arrow) => {
-            const pal = getTonePalette(arrow.tone, theme);
-            const { start, end, control } = arrowGeometry(arrow);
-            const isSelected = selectedSet.has(arrow.id);
-            const isBeingReplaced = removedGhostSet.has(arrow.id);
-            const stroke = isSelected ? accentColor : pal.stroke;
-            const arrowStyle = resolveRenderStyle(arrow, renderStyle);
-            const markers = resolveArrowMarkers(arrow, { start, control, end });
-            const paths = generateArrowPath(
-              markers.lineStart,
-              control,
-              markers.lineEnd,
-              arrow.seed,
-              stroke,
-              arrowStyle,
-              arrow.dashed
-            );
+          {/* 4. ARROWS (memoized so RoughJS paths never regenerate during pan/zoom/hover) */}
+          {arrows.map((arrow) => (
+            <ArrowElementMemo
+              key={arrow.id}
+              arrow={arrow}
+              geometry={arrowGeometry(arrow)}
+              labelSpot={labelSpots.get(arrow.id)}
+              theme={theme}
+              paper={paper}
+              accentColor={accentColor}
+              renderStyle={renderStyle}
+              isSelected={selectedSet.has(arrow.id)}
+              isBeingReplaced={removedGhostSet.has(arrow.id)}
+              forkActive={forkActive}
+              onDoubleClickArrow={startDoubleClickEdit}
+            />
+          ))}
 
-            const spot = labelSpots.get(arrow.id);
-            const labelX = spot?.x ?? 0.25 * start.x + 0.5 * control.x + 0.25 * end.x;
-            const labelY = spot?.y ?? 0.25 * start.y + 0.5 * control.y + 0.25 * end.y;
-
-            return (
-              <g
-                key={arrow.id}
-                data-element-id={arrow.id}
-                data-kind="arrow"
-                opacity={isBeingReplaced ? (forkActive ? 0.34 : 0.25) : 1}
-                onDoubleClick={(ev) => {
-                  ev.stopPropagation();
-                  startDoubleClickEdit(arrow);
-                }}
-              >
-                {paths.map((p, idx) => (
-                  <path
-                    key={idx}
-                    d={p.d}
-                    stroke={p.stroke}
-                    strokeWidth={isSelected ? 1.9 : p.strokeWidth}
-                    fill="none"
-                    strokeLinecap="round"
-                    strokeDasharray={
-                      arrow.dashed && arrowStyle === "clean" ? "6 5" : undefined
-                    }
-                  />
-                ))}
-                <ArrowMarkerPaths
-                  start={markers.start}
-                  end={markers.end}
-                  stroke={stroke}
-                  paper={paper}
-                  strokeWidth={isSelected ? 1.85 : 1.45}
-                />
-                {arrow.label && (
-                  <g transform={`translate(${labelX}, ${labelY})`}>
-                    <rect
-                      x={-(arrow.label.length * 3.6 + 9)}
-                      y={-11}
-                      width={arrow.label.length * 7.2 + 18}
-                      height={20}
-                      rx={6}
-                      fill={theme === "midnight" ? "#151A24" : "#FAF8F2"}
-                      stroke={stroke}
-                      strokeOpacity={0.2}
-                      strokeWidth={1}
-                    />
-                    <text
-                      x={0}
-                      y={3}
-                      textAnchor="middle"
-                      fill={pal.subtext}
-                      className="font-mono text-[10.5px] font-medium"
-                    >
-                      {arrow.label}
-                    </text>
-                  </g>
-                )}
-              </g>
-            );
-          })}
-
-          {/* 5. FREEDRAW STROKES */}
-          {freedraws.map((dr) => {
-            if (!dr.points || dr.points.length < 2) return null;
-            const pal = getTonePalette(dr.tone, theme);
-            const isSelected = selectedSet.has(dr.id);
-            return (
-              <path
-                key={dr.id}
-                d={smoothFreedrawPath(dr.points)}
-                stroke={isSelected ? accentColor : pal.stroke}
-                strokeWidth={2.4}
-                fill="none"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            );
-          })}
+          {/* 5. FREEDRAW STROKES (memoized) */}
+          {freedraws.map((dr) => (
+            <FreedrawElementMemo
+              key={dr.id}
+              dr={dr}
+              theme={theme}
+              accentColor={accentColor}
+              isSelected={selectedSet.has(dr.id)}
+            />
+          ))}
 
           {/* Live in-progress freedraw stroke */}
           {drag?.mode === "freedraw" &&
@@ -1499,6 +1676,10 @@ export function JevCanvas({
                     strokeWidth={2.5}
                     strokeDasharray="6 4"
                   />
+                )}
+
+                {(el.kind === "actor" || el.kind === "text") && (
+                  <rect width={el.width} height={el.height} fill="transparent" />
                 )}
 
                 {el.kind !== "text" && (
@@ -2083,6 +2264,7 @@ export function JevCanvas({
           ))}
         </g>
       </svg>
+      </div>
 
       {/* SEAMLESS IN-PLACE TITLE EDITOR */}
       {editingElement && (() => {
@@ -2117,33 +2299,40 @@ export function JevCanvas({
         }
         const isArrow = editingElement.kind === "arrow";
         const isFrame = isContainerKind(editingElement.kind);
+        const isActor = editingElement.kind === "actor";
         const arrowMid = isArrow
           ? resolveArrowEndpoints(editingElement, elementsById)
           : null;
         const editSpot = isArrow ? labelSpots.get(editingElement.id) : undefined;
+        const width = isArrow
+          ? 128
+          : isFrame
+            ? Math.max(130, 180 * viewport.zoom)
+            : Math.max(96, (editingElement.width - 20) * viewport.zoom);
         const left = isArrow && arrowMid
           ? viewport.x + (editSpot?.x ?? 0.25 * arrowMid.start.x + 0.5 * arrowMid.control.x + 0.25 * arrowMid.end.x) * viewport.zoom - 64
           : isFrame
             ? viewport.x + (editingElement.x + 12) * viewport.zoom
-            : viewport.x + (editingElement.x + 10) * viewport.zoom;
+            : isActor
+              ? viewport.x + (editingElement.x + editingElement.width / 2) * viewport.zoom - width / 2
+              : viewport.x + (editingElement.x + 10) * viewport.zoom;
         const top = isArrow && arrowMid
           ? viewport.y + (editSpot?.y ?? 0.25 * arrowMid.start.y + 0.5 * arrowMid.control.y + 0.25 * arrowMid.end.y) * viewport.zoom - 14
           : isFrame
             ? viewport.y + (editingElement.y + 6) * viewport.zoom
             : viewport.y +
               (editingElement.y +
-                (editSession?.field === "sublabel"
-                  ? editingElement.height * 0.74
-                  : editingElement.kind === "database"
-                    ? editingElement.height * 0.54
-                    : editingElement.height / 2)) *
+                (isActor
+                  ? editSession?.field === "sublabel"
+                    ? editingElement.height - 6
+                    : editingElement.height - 16
+                  : editSession?.field === "sublabel"
+                    ? editingElement.height * 0.74
+                    : editingElement.kind === "database"
+                      ? editingElement.height * 0.54
+                      : editingElement.height / 2)) *
                 viewport.zoom -
               Math.max(12, 11 * viewport.zoom);
-        const width = isArrow
-          ? 128
-          : isFrame
-            ? Math.max(130, 180 * viewport.zoom)
-            : Math.max(96, (editingElement.width - 20) * viewport.zoom);
         const fontSize = isArrow
           ? 11.5
           : isFrame
@@ -2195,4 +2384,4 @@ export function JevCanvas({
       })()}
     </div>
   );
-}
+});

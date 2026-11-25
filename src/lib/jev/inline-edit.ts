@@ -34,6 +34,9 @@ export function pickEditField(el: JevElement, world: Point): EditField {
     return world.y - el.y > headerBandHeight(el) ? "sublabel" : "label";
   }
   if (el.kind === "arrow" || !el.sublabel) return "label";
+  if (el.kind === "actor") {
+    return world.y - el.y > el.height - 12 ? "sublabel" : "label";
+  }
   return world.y - el.y > el.height * SUBLABEL_ZONE_START ? "sublabel" : "label";
 }
 

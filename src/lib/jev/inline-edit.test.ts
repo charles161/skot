@@ -202,3 +202,41 @@ describe("text notes grow to fit what is typed", () => {
     expect([edited.width, edited.height]).toEqual([172, 72]);
   });
 });
+
+// Real interview bug (25 Nov): double-clicking a User (actor) node created a new text element underneath instead of editing its label.
+describe("actor (User) and text double-click editing", () => {
+  it("double-clicking anywhere on an actor stick figure or its User label edits the label (not sublabel)", () => {
+    const actor: JevElement = {
+      id: "u1",
+      kind: "actor",
+      x: 100,
+      y: 100,
+      width: 72,
+      height: 104,
+      label: "User",
+      sublabel: "Browser / App",
+      tone: "terracotta",
+      seed: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    // Stick figure body (top 70%)
+    expect(pickEditField(actor, { x: 136, y: 140 })).toBe("label");
+    // "User" title line right below stick figure (y = 100 + 82 = 182, ~79% down!)
+    expect(pickEditField(actor, { x: 136, y: 182 })).toBe("label");
+    // Very bottom sublabel line (y = 100 + 98 = 198)
+    expect(pickEditField(actor, { x: 136, y: 198 })).toBe("sublabel");
+  });
+
+  it("handleCanvasDoubleClick resolves findShapeAtPoint before creating a new text element, and actor/text render transparent hit rects", async () => {
+    const { readFileSync } = await import("node:fs");
+    const path = await import("node:path");
+    const canvas = readFileSync(path.resolve(__dirname, "../../components/jev/JevCanvas.tsx"), "utf8");
+    const fnMatch = canvas.match(/const handleCanvasDoubleClick = [\s\S]*?\n  \};/);
+    expect(fnMatch).not.toBeNull();
+    expect(fnMatch![0]).toMatch(/findShapeAtPoint/);
+    expect(fnMatch![0]).toMatch(/startDoubleClickEdit/);
+    // actor and text shapes need a transparent bounding hit rect inside their <g>
+    expect(canvas).toMatch(/el\.kind === "actor" \|\| el\.kind === "text"/);
+  });
+});

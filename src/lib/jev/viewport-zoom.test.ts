@@ -34,6 +34,33 @@ describe("viewport zoom (wheel, pinch, keys, buttons)", () => {
     expect(zout.zoom).toBeLessThan(1);
   });
 
+  it("trackpad pinch (small ctrl+wheel deltas) tracks native Chromium finger scale (~exp(-deltaY/100))", () => {
+    let v = { x: 80, y: 40, zoom: 0.532 };
+    const cursor = { x: 800, y: 480 };
+    for (let i = 0; i < 90; i++) {
+      v = wheelViewport(v, { deltaX: 0, deltaY: -1.5, ctrlKey: true, metaKey: false }, cursor);
+    }
+    const ratio = v.zoom / 0.532;
+    const nativeChromiumScale = Math.exp(135 / 100); // ~3.857
+    expect(ratio).toBeGreaterThan(nativeChromiumScale * 0.9);
+    expect(ratio).toBeLessThan(nativeChromiumScale * 1.1);
+  });
+
+  it("discrete mouse ctrl+wheel notches zoom in smooth controlled steps (not 2.7x jumps) and normalize deltaMode", () => {
+    const v = { x: 0, y: 0, zoom: 1 };
+    const cursor = { x: 400, y: 300 };
+    const oneNotch = wheelViewport(v, { deltaX: 0, deltaY: -100, ctrlKey: true, metaKey: false }, cursor);
+    expect(oneNotch.zoom).toBeGreaterThan(1.15);
+    expect(oneNotch.zoom).toBeLessThan(1.4);
+    const lineMode = wheelViewport(v, { deltaX: 0, deltaY: -3, deltaMode: 1, ctrlKey: false, metaKey: false }, cursor);
+    expect(lineMode.y).toBeGreaterThan(20);
+  });
+
+  it("supports wide enough zoom range for large interview diagrams (0.15x to 4x)", () => {
+    expect(ZOOM_MIN).toBeLessThanOrEqual(0.2);
+    expect(ZOOM_MAX).toBeGreaterThanOrEqual(3.5);
+  });
+
   it("a plain wheel pans by the deltas", () => {
     expect(
       wheelViewport({ x: 10, y: 20, zoom: 1.5 }, { deltaX: 5, deltaY: -7, ctrlKey: false, metaKey: false }, { x: 0, y: 0 })
@@ -54,8 +81,8 @@ describe("viewport zoom (wheel, pinch, keys, buttons)", () => {
   });
 });
 
-describe("wheel listener wiring", () => {
-  it("no component uses React onWheel (passive in React 17+, so preventDefault is ignored and the browser page zooms too); register a native { passive: false } listener instead", async () => {
+describe("wheel listener & canvas performance wiring", () => {
+  it("registers a single stable { passive: false } wheel listener (never re-bound per viewport change) and memoizes arrows/freedraws", async () => {
     const { readdirSync, readFileSync } = await import("node:fs");
     const path = await import("node:path");
     const dir = path.resolve(__dirname, "../../components/jev");
@@ -65,5 +92,13 @@ describe("wheel listener wiring", () => {
     expect(hits).toEqual([]);
     const canvas = readFileSync(path.join(dir, "JevCanvas.tsx"), "utf8");
     expect(canvas).toMatch(/addEventListener\("wheel", handleWheel, \{ passive: false \}\)/);
+    // Regression check (25 Nov interview lag): wheel listener must never read stale viewport closure or tear down on viewport changes
+    expect(canvas).not.toMatch(/wheelViewport\(\s*viewport\s*,/);
+    expect(canvas).toMatch(/liveViewportRef/);
+    // Arrows and freedraws must be memoized so RoughJS path generation never runs during pan/zoom
+    expect(canvas).toMatch(/ArrowElementMemo\s*=\s*React\.memo/);
+    expect(canvas).toMatch(/FreedrawElementMemo\s*=\s*React\.memo/);
+    // Background dot grid must not mutate backgroundImage radial-gradient string on every zoom tick
+    expect(canvas).not.toMatch(/backgroundImage:\s*`radial-gradient\([^`]*viewport\.zoom/);
   });
 });
