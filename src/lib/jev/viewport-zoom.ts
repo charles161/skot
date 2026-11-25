@@ -46,7 +46,10 @@ function isDiscreteMouseWheelZoom(
 ): boolean {
   if (e.metaKey) return true;
   if (e.deltaMode && e.deltaMode !== 0) return true;
-  return Number.isInteger(rawDy) && Math.abs(rawDy) >= 100;
+  const abs = Math.abs(rawDy);
+  if (!Number.isInteger(rawDy) || abs < 50) return false;
+  // Standard physical mouse wheel notches arrive as 100/120px at 1x DPR or 50/60px at 2x DPR
+  return abs >= 100 || abs % 50 === 0 || abs % 60 === 0;
 }
 
 /**

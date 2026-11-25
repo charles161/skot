@@ -47,12 +47,15 @@ describe("viewport zoom (wheel, pinch, keys, buttons)", () => {
     expect(ratio).toBeLessThan(nativeChromiumScale * 1.1);
   });
 
-  it("discrete mouse ctrl+wheel notches zoom in smooth controlled steps (not 2.7x jumps) and normalize deltaMode", () => {
+  it("discrete mouse ctrl+wheel notches zoom in smooth controlled steps (1x and 2x HiDPI) and normalize deltaMode", () => {
     const v = { x: 0, y: 0, zoom: 1 };
     const cursor = { x: 400, y: 300 };
     const oneNotch = wheelViewport(v, { deltaX: 0, deltaY: -100, ctrlKey: true, metaKey: false }, cursor);
     expect(oneNotch.zoom).toBeGreaterThan(1.15);
     expect(oneNotch.zoom).toBeLessThan(1.4);
+    const hidpiNotch = wheelViewport(v, { deltaX: 0, deltaY: -50, ctrlKey: true, metaKey: false }, cursor);
+    expect(hidpiNotch.zoom).toBeGreaterThan(1.05);
+    expect(hidpiNotch.zoom).toBeLessThan(1.2);
     const lineMode = wheelViewport(v, { deltaX: 0, deltaY: -3, deltaMode: 1, ctrlKey: false, metaKey: false }, cursor);
     expect(lineMode.y).toBeGreaterThan(20);
   });
