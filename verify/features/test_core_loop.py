@@ -97,7 +97,9 @@ def board(skot, n_shapes, timeout=6):
 
 
 def by_creation(els):
-    return sorted([e for e in els if is_shape(e)], key=lambda e: (e.get("createdAt", 0), e["id"]))
+    # Python's Timsort is stable: preserves exact insertion order when two nodes share the same createdAt ms
+    # (breaking ties on random UUID e["id"] causes nondeterministic flakes on fast runners).
+    return sorted([e for e in els if is_shape(e)], key=lambda e: e.get("createdAt", 0))
 
 
 def gap(a, b):
