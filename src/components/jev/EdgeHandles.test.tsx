@@ -127,10 +127,9 @@ describe("node hover zone includes its handles (moving node -> handle keeps hove
     expect(move).toMatch(/pointOnEdgeHandle\(/);
   });
 
-  it("JevCanvas renders handles through <EdgeHandles> (one implementation)", () => {
-    const src = read("src/components/jev/JevCanvas.tsx");
-    expect(src).toMatch(/<EdgeHandles\b/);
-    expect(src).not.toMatch(/getEdgeHandles\(/);
+  it("renders edge handles through one shared geometry helper (getEdgeHandles in canvas-renderer)", () => {
+    const renderer = read("src/lib/jev/canvas-renderer.ts");
+    expect(renderer).toMatch(/getEdgeHandles\(/);
   });
 });
 

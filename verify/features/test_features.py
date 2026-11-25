@@ -91,8 +91,8 @@ def test_first_load(page, skot, evidence):
     rgb = [int(v) for v in re.findall(r"\d+", bg)[:3]]
     toggle = page.get_by_role("button", name=re.compile("Switch to .* light theme"))
     evidence.note(url=page.url, html_dark=" dark" in " " + html_class, body_background=bg,
-                  canvas=page.locator("[role=application] svg").count())
-    assert page.locator("[role=application] svg").count() == 1, "the canvas did not render"
+                  canvas=page.locator('[role=application] canvas[data-canvas-layer="static"], [role=application] svg').count())
+    assert page.locator('[role=application] canvas[data-canvas-layer="static"], [role=application] svg').count() == 1, "the canvas did not render"
     assert skot.room_id(), "no board was created at /b/<id>"
     assert "dark" in html_class.split(), "html is not dark by default (class=%r)" % html_class
     assert max(rgb) < 80, "body background %s is not a dark color" % bg
@@ -139,6 +139,16 @@ def test_starters(page, skot, evidence):
 STARTER_BOARDS = {"url-shortener": "URL shortener", "chat": "Chat", "news-feed": "News feed",
                   "rate-limiter": "Rate limiter", "payments": "Payments", "notifications": "Notifications"}
 CARD_TEXT_JS = r"""id => {
+  const snap = window.__skotDebug && window.__skotDebug.getSceneSnapshot && window.__skotDebug.getSceneSnapshot();
+  if (snap) {
+    const el = snap.elements.find(e => e.id === id);
+    if (!el) return null;
+    const c = document.createElement('canvas');
+    const ctx = c.getContext('2d');
+    const mono = getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim() || 'monospace';
+    ctx.font = `500 10.5px ${mono}`;
+    return el.texts.map(t => ctx.measureText(t.text || '').width);
+  }
   const g = document.querySelector(`[role=application] svg [data-element-id="${CSS.escape(id)}"]`);
   return g ? [...g.querySelectorAll('text')].filter(t => getComputedStyle(t).fontFamily.includes('Mono'))
     .map(t => t.getComputedTextLength()) : null;
@@ -232,7 +242,11 @@ def test_ghost_predictions(page, skot, evidence):
     after_tab = skot.suggestion_titles(2)
     active = [s["n"] for s in after_tab if s["active"]]
     assert active == [2], "Tab should make prediction 2 active, got %s" % after_tab
-    svg_bytes = page.locator("[role=application] svg").evaluate("s => s.innerHTML.length")
+    svg_bytes = page.evaluate("""() => {
+        const snap = window.__skotDebug && window.__skotDebug.getSceneSnapshot && window.__skotDebug.getSceneSnapshot();
+        if (snap) return JSON.stringify(snap).length;
+        return document.querySelector('[role=application] svg')?.innerHTML.length || 0;
+    }""")
     n_before = len(skot.shapes())
     skot.press("Enter")
     els = skot.wait_state(lambda es: len([e for e in es if is_shape(e)]) > n_before, what="Enter to apply")
@@ -266,12 +280,21 @@ READ_OPTIONS_JS = """() => {
             active: b.getAttribute('aria-pressed') === 'true', text: b.innerText.replace(/\\s+/g, ' ')};
   })};
 }"""
-READ_GHOSTS_JS = """() => ({
-  shapes: [...document.querySelectorAll('[role=application] svg [data-ghost-shape]')]
-    .map(g => ({id: g.getAttribute('data-ghost-shape'), label: g.getAttribute('data-label')})),
-  arrows: [...document.querySelectorAll('[role=application] svg [data-ghost-arrow]')]
-    .map(g => ({from: g.getAttribute('data-from'), to: g.getAttribute('data-to'), label: g.getAttribute('data-label')})),
-})"""
+READ_GHOSTS_JS = """() => {
+  const snap = window.__skotDebug && window.__skotDebug.getSceneSnapshot && window.__skotDebug.getSceneSnapshot();
+  if (snap) {
+    return {
+      shapes: snap.ghostShapes.map(g => ({id: g.id, label: g.label})),
+      arrows: snap.ghostArrows.map(a => ({from: a.fromId, to: a.toId, label: a.label})),
+    };
+  }
+  return {
+    shapes: [...document.querySelectorAll('[role=application] svg [data-ghost-shape]')]
+      .map(g => ({id: g.getAttribute('data-ghost-shape'), label: g.getAttribute('data-label')})),
+    arrows: [...document.querySelectorAll('[role=application] svg [data-ghost-arrow]')]
+      .map(g => ({from: g.getAttribute('data-from'), to: g.getAttribute('data-to'), label: g.getAttribute('data-label')})),
+  };
+}"""
 
 
 def ai_mode(page):
@@ -602,11 +625,10 @@ def test_arrows_connect(page, skot, evidence):
     skot.clear()
     sx, sy = skot.to_screen(*center(cart))
     page.mouse.move(sx, sy)
-    handle = page.locator('.jev-edge-handle[data-side="bottom"]').first
-    handle.wait_for(state="visible", timeout=3000)
-    hb = handle.bounding_box()
+    page.wait_for_timeout(120)
+    hx, hy = skot.to_screen(cart["x"] + cart["width"] / 2, cart["y"] + cart["height"])
     tx, ty = skot.to_screen(*center(tax))
-    page.mouse.move(hb["x"] + hb["width"] / 2, hb["y"] + hb["height"] / 2)
+    page.mouse.move(hx, hy)
     page.mouse.down()
     page.mouse.move(tx, ty, steps=12)
     page.mouse.up()
@@ -1255,7 +1277,7 @@ def test_packs_panel(page, skot, evidence, new_page, base_url):
     phone = new_page("phone")
     phone.set_viewport_size({"width": 390, "height": 844})
     phone.goto(base_url + "/", wait_until="load", timeout=60000)
-    phone.wait_for_selector("[role=application] svg", timeout=30000)
+    phone.wait_for_selector('[role=application] canvas[data-canvas-layer="static"], [role=application] svg', timeout=30000)
     phone.get_by_role("button", name="Board menu").click()
     phone.get_by_role("menuitem", name="Notation Packs").click()
     pp = phone.get_by_role("complementary", name="Notation packs")
@@ -1428,7 +1450,7 @@ def test_practice_mode(page, skot, evidence):
     surfaces = {
         "suggestions": page.locator(SUGGESTIONS).count(),
         "fork_panel": page.locator(FORK_PANEL).count(),
-        "ghosts": page.locator(GHOSTS).count(),
+        "ghosts": len(ghosts(page)["shapes"]) + len(ghosts(page)["arrows"]),
         "fork_button": multi_bar.get_by_role("button", name=re.compile("Fork it")).count() if multi_bar.count() else 0,
         "morph_switcher": multi_bar.locator('[role=tablist][aria-label="Notation morph switcher"]').count()
         if multi_bar.count() else 0,
@@ -1514,6 +1536,24 @@ def test_text_note_fit(page, skot, evidence):
     el = skot.add("text", text, skot.to_world(380, 480))
     skot.clear()
     clipped = page.evaluate("""id => {
+        const snap = window.__skotDebug && window.__skotDebug.getSceneSnapshot && window.__skotDebug.getSceneSnapshot();
+        if (snap) {
+            const el = snap.elements.find(e => e.id === id);
+            if (!el) return null;
+            const c = document.createElement('canvas');
+            const ctx = c.getContext('2d');
+            const sans = getComputedStyle(document.documentElement).getPropertyValue('--font-sans').trim() || 'sans-serif';
+            ctx.font = `600 14px ${sans}`;
+            const words = (el.label || '').split(/\\s+/).filter(Boolean);
+            const maxW = Math.max(20, el.width - 16);
+            let lines = 1, line = words[0] || '';
+            for (let i = 1; i < words.length; i++) {
+                const cand = line + ' ' + words[i];
+                if (ctx.measureText(cand).width <= maxW) line = cand;
+                else { lines++; line = words[i]; }
+            }
+            return lines * 14 * 1.2 > el.height + 1;
+        }
         const g = document.querySelector(`[role=application] svg [data-element-id="${CSS.escape(id)}"]`);
         const span = g && g.querySelector('foreignObject span');
         const fo = g && g.querySelector('foreignObject');
@@ -1720,7 +1760,11 @@ def test_board_import(page, skot, new_page, evidence, base_url, tmp_path):
     got = skot.wait_state(lambda els: len(els) == len(want), what="the imported board")
     assert BOARD_URL.search(page.url) and "import=" not in page.url, "URL after import: %s" % page.url
     assert [(e["id"], e["label"]) for e in got] == want
-    canvas_text = page.locator("[role=application] svg").text_content()
+    canvas_text = page.evaluate("""() => {
+        const snap = window.__skotDebug && window.__skotDebug.getSceneSnapshot && window.__skotDebug.getSceneSnapshot();
+        if (snap) return snap.elements.map(e => [e.label, e.sublabel, ...e.texts.map(t => t.text)].filter(Boolean).join(' ')).join(' ');
+        return document.querySelector('[role=application] svg')?.textContent || '';
+    }""")
     assert all(label in canvas_text for _, label in want), "imported labels not drawn on the canvas"
 
     # 2. Save board (.json), then Open board (.json) through the file chooser: a new room, identical elements.
@@ -1821,8 +1865,12 @@ def test_two_person_sync(page, skot, new_page, evidence, base_url):
     skot.add("box", "Shared Node", o)
     guest = new_page("guest")
     guest.goto(page.url, wait_until="load")
-    guest.wait_for_selector("[role=application] svg", timeout=30000)
-    has = "l => (document.querySelector('[role=application] svg')?.textContent || '').includes(l)"
+    guest.wait_for_selector('[role=application] canvas[data-canvas-layer="static"], [role=application] svg', timeout=30000)
+    has = """l => {
+        const snap = window.__skotDebug && window.__skotDebug.getSceneSnapshot && window.__skotDebug.getSceneSnapshot();
+        if (snap) return snap.elements.some(e => (e.label || '').includes(l) || (e.sublabel || '').includes(l));
+        return (document.querySelector('[role=application] svg')?.textContent || '').includes(l);
+    }"""
     guest.wait_for_function(has, arg="Shared Node", timeout=30000)
     skot.add("box", "Live Edit", (o[0] + 400, o[1]))
     guest.wait_for_function(has, arg="Live Edit", timeout=20000)

@@ -5,6 +5,7 @@ import {
   wheelViewport,
   zoomAroundPoint,
   zoomKeyAction,
+  zoomToScale,
 } from "@/lib/jev/viewport-zoom";
 
 const worldAt = (v: { x: number; y: number; zoom: number }, p: { x: number; y: number }) => ({
@@ -61,10 +62,35 @@ describe("viewport zoom (wheel, pinch, keys, buttons)", () => {
     expect(ZOOM_MAX).toBeGreaterThanOrEqual(3.5);
   });
 
-  it("a plain wheel pans by the deltas", () => {
+  it("a slow frame loses no pinch: one coalesced event of -66 equals twelve of -5.5", () => {
+    const start = { x: 80, y: 40, zoom: 1 };
+    const cursor = { x: 640, y: 360 };
+    let stepped = start;
+    for (let i = 0; i < 12; i++) {
+      stepped = wheelViewport(stepped, { deltaX: 0, deltaY: -5.5, ctrlKey: true, metaKey: false }, cursor);
+    }
+    const coalesced = wheelViewport(start, { deltaX: 0, deltaY: -66, ctrlKey: true, metaKey: false }, cursor);
+    expect(coalesced.zoom).toBeCloseTo(stepped.zoom, 5);
+    expect(coalesced.x).toBeCloseTo(stepped.x, 3);
+    expect(coalesced.y).toBeCloseTo(stepped.y, 3);
+  });
+
+  it("zoomToScale supports Safari desktop gesturechange anchored at the cursor", () => {
+    const v = { x: 120, y: 80, zoom: 1.0 };
+    const cursor = { x: 500, y: 350 };
+    const z = zoomToScale(v, 1.85, cursor);
+    expect(z.zoom).toBeCloseTo(1.85, 5);
+    expect(worldAt(z, cursor).x).toBeCloseTo(worldAt(v, cursor).x, 4);
+    expect(worldAt(z, cursor).y).toBeCloseTo(worldAt(v, cursor).y, 4);
+  });
+
+  it("a plain wheel pans by the deltas, and Shift+wheel pans horizontally like Excalidraw", () => {
     expect(
       wheelViewport({ x: 10, y: 20, zoom: 1.5 }, { deltaX: 5, deltaY: -7, ctrlKey: false, metaKey: false }, { x: 0, y: 0 })
     ).toEqual({ x: 5, y: 27, zoom: 1.5 });
+    expect(
+      wheelViewport({ x: 10, y: 20, zoom: 1.5 }, { deltaX: 0, deltaY: 40, ctrlKey: false, metaKey: false, shiftKey: true }, { x: 0, y: 0 })
+    ).toEqual({ x: -30, y: 20, zoom: 1.5 });
   });
 
   it("maps Ctrl/Cmd + = / + / - / 0 and Shift+1 to zoom actions, and leaves other keys alone", () => {
@@ -95,9 +121,11 @@ describe("wheel listener & canvas performance wiring", () => {
     // Regression check (25 Nov interview lag): wheel listener must never read stale viewport closure or tear down on viewport changes
     expect(canvas).not.toMatch(/wheelViewport\(\s*viewport\s*,/);
     expect(canvas).toMatch(/liveViewportRef/);
-    // Arrows and freedraws must be memoized so RoughJS path generation never runs during pan/zoom
-    expect(canvas).toMatch(/ArrowElementMemo\s*=\s*React\.memo/);
-    expect(canvas).toMatch(/FreedrawElementMemo\s*=\s*React\.memo/);
+    // Excalidraw-grade dual HTML5 <canvas> 2D engine + Safari gesture support + per-element offscreen bitmap cache
+    expect(canvas).toMatch(/ElementBitmapCache/);
+    expect(canvas).toMatch(/shouldCacheIgnoreZoomRef/);
+    expect(canvas).toMatch(/addEventListener\("gesturestart"/);
+    expect(canvas).toMatch(/addEventListener\("gesturechange"/);
     // Background dot grid must not mutate backgroundImage radial-gradient string on every zoom tick
     expect(canvas).not.toMatch(/backgroundImage:\s*`radial-gradient\([^`]*viewport\.zoom/);
   });

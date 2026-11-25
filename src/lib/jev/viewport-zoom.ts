@@ -1,7 +1,7 @@
 import type { Point, Viewport } from "./types";
 
-export const ZOOM_MIN = 0.15;
-export const ZOOM_MAX = 4.0;
+export const ZOOM_MIN = 0.1;
+export const ZOOM_MAX = 8.0;
 export const ZOOM_STEP_IN = 1.14;
 export const ZOOM_STEP_OUT = 1 / ZOOM_STEP_IN;
 
@@ -10,9 +10,8 @@ const PINCH_SENSITIVITY = 0.01;
 /** Discrete mouse Ctrl/Cmd+wheel (~100px per notch -> ~28% zoom step). */
 const WHEEL_ZOOM_SENSITIVITY = 0.0025;
 const WHEEL_DELTA_CLAMP = 120;
-const PINCH_DELTA_THRESHOLD = 50;
 
-const clampZoom = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
+export const clampZoom = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
 
 function normalizeWheelDelta(delta: number, deltaMode?: number): number {
   if (deltaMode === 1) return delta * 16;
@@ -20,9 +19,9 @@ function normalizeWheelDelta(delta: number, deltaMode?: number): number {
   return delta;
 }
 
-/** Scales the viewport by `factor`, keeping the world point under the screen `anchor` fixed. */
-export function zoomAroundPoint(v: Viewport, factor: number, anchor: Point): Viewport {
-  const zoom = clampZoom(v.zoom * factor);
+/** Scales the viewport to an exact target `nextZoom`, keeping the world point under screen `anchor` fixed. */
+export function zoomToScale(v: Viewport, nextZoom: number, anchor: Point): Viewport {
+  const zoom = clampZoom(nextZoom);
   const ratio = zoom / v.zoom;
   return {
     zoom,
@@ -31,21 +30,62 @@ export function zoomAroundPoint(v: Viewport, factor: number, anchor: Point): Vie
   };
 }
 
-/** Ctrl/Cmd + wheel (trackpad pinch arrives as ctrl+wheel) zooms around the cursor; a plain wheel pans. */
+/** Scales the viewport by `factor`, keeping the world point under the screen `anchor` fixed. */
+export function zoomAroundPoint(v: Viewport, factor: number, anchor: Point): Viewport {
+  return zoomToScale(v, v.zoom * factor, anchor);
+}
+
+/**
+ * Classifies a ctrl/meta+wheel event into trackpad pinch vs discrete mouse wheel notch.
+ * Trackpad pinches (including coalesced frames like -66) use Chromium's exact additive exp(-dy / 100);
+ * discrete mouse notches (whole multiples >= 100, line/page mode, or Cmd+wheel) use a gentle step.
+ */
+function isDiscreteMouseWheelZoom(
+  rawDy: number,
+  e: { deltaMode?: number; ctrlKey: boolean; metaKey: boolean }
+): boolean {
+  if (e.metaKey) return true;
+  if (e.deltaMode && e.deltaMode !== 0) return true;
+  return Number.isInteger(rawDy) && Math.abs(rawDy) >= 100;
+}
+
+/**
+ * Excalidraw-compatible wheel handler:
+ * - Ctrl/Cmd + wheel (and trackpad pinch) zooms around the cursor (unless Shift is held).
+ * - Shift + wheel pans horizontally (Ctrl/Cmd + Shift + wheel pans vertically).
+ * - Plain wheel pans smoothly in x and y.
+ */
 export function wheelViewport(
   v: Viewport,
-  e: { deltaX: number; deltaY: number; deltaMode?: number; ctrlKey: boolean; metaKey: boolean },
+  e: {
+    deltaX: number;
+    deltaY: number;
+    deltaMode?: number;
+    ctrlKey: boolean;
+    metaKey: boolean;
+    shiftKey?: boolean;
+  },
   cursor: Point
 ): Viewport {
   const dx = normalizeWheelDelta(e.deltaX, e.deltaMode);
   const dy = normalizeWheelDelta(e.deltaY, e.deltaMode);
-  if (e.ctrlKey || e.metaKey) {
-    const isTrackpadPinch = e.ctrlKey && !e.metaKey && Math.abs(dy) < PINCH_DELTA_THRESHOLD;
-    const factor = isTrackpadPinch
-      ? Math.exp(-dy * PINCH_SENSITIVITY)
-      : Math.exp(-Math.max(-WHEEL_DELTA_CLAMP, Math.min(WHEEL_DELTA_CLAMP, dy)) * WHEEL_ZOOM_SENSITIVITY);
+  if (!dx && !dy) return v;
+
+  const hasZoomModifier = e.ctrlKey || e.metaKey;
+  if (hasZoomModifier && !e.shiftKey && dy !== 0) {
+    const factor = isDiscreteMouseWheelZoom(e.deltaY, e)
+      ? Math.exp(-Math.max(-WHEEL_DELTA_CLAMP, Math.min(WHEEL_DELTA_CLAMP, dy)) * WHEEL_ZOOM_SENSITIVITY)
+      : Math.exp(-dy * PINCH_SENSITIVITY);
     return zoomAroundPoint(v, factor, cursor);
   }
+
+  if (e.shiftKey) {
+    const delta = dy || dx;
+    return hasZoomModifier
+      ? { ...v, y: v.y - delta }
+      : { ...v, x: v.x - delta };
+  }
+
   return { ...v, x: v.x - dx, y: v.y - dy };
 }
 

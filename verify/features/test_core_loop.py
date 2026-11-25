@@ -16,7 +16,11 @@ from driver import Driver, is_shape, overlapping_pairs
 from test_features import THOUGHT_BAR, ghosts, read_options, shot
 
 SUGGESTIONS_PANEL = '[role=region][aria-label="Predictive drafting suggestions"] button[aria-pressed]'
-SHAPES_JS = "() => document.querySelectorAll('[role=application] svg [data-element-id]:not([data-kind=arrow])').length"
+SHAPES_JS = """() => {
+  const snap = window.__skotDebug && window.__skotDebug.getSceneSnapshot && window.__skotDebug.getSceneSnapshot();
+  if (snap) return snap.elements.filter(e => e.kind !== 'arrow').length;
+  return document.querySelectorAll('[role=application] svg [data-element-id]:not([data-kind=arrow])').length;
+}"""
 JEV = {"source": "gateway:typesafe-ai/jev", "model": "typesafe-ai/jev", "isHeuristic": False, "latencyMs": 90}
 
 

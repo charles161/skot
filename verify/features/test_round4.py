@@ -267,9 +267,16 @@ DOCK_JS = """() => {
   const tops = [bar, region].filter(Boolean).map((n) => n.getBoundingClientRect().top);
   return Math.min(...tops);
 }"""
-LABEL_HEIGHT_JS = """(id) => Math.max(0, ...[...document.querySelectorAll(
-  `[role=application] svg [data-element-id="${CSS.escape(id)}"] text, [role=application] svg [data-element-id="${CSS.escape(id)}"] foreignObject *`
-)].filter((n) => n.children.length === 0 && n.textContent.trim()).map((n) => n.getBoundingClientRect().height))"""
+LABEL_HEIGHT_JS = """(id) => {
+  const snap = window.__skotDebug && window.__skotDebug.getSceneSnapshot && window.__skotDebug.getSceneSnapshot();
+  if (snap) {
+    const el = snap.elements.find(e => e.id === id);
+    return el ? 14 * snap.viewport.zoom : 0;
+  }
+  return Math.max(0, ...[...document.querySelectorAll(
+    `[role=application] svg [data-element-id="${CSS.escape(id)}"] text, [role=application] svg [data-element-id="${CSS.escape(id)}"] foreignObject *`
+  )].filter((n) => n.children.length === 0 && n.textContent.trim()).map((n) => n.getBoundingClientRect().height));
+}"""
 
 
 @check("phone-pans")
@@ -359,11 +366,27 @@ def test_flow_both_ways(page, skot, evidence):
     shot(page, evidence, "flow-both-ways", "1-there-and-back")
     assert sorted(arrows_named(els)) == [("Queue", "Web"), ("Web", "Queue")], arrows_named(els)
     # Judge A, second round: the way back was drawn exactly on top of the way there and read as one arrow.
-    labels_at = page.evaluate("""() => [...document.querySelectorAll('[role=application] svg [data-element-id][data-kind="arrow"]')].map((g) => {
-        const t = [...g.querySelectorAll('text')].find((n) => n.textContent.trim());
-        const r = t.getBoundingClientRect();
-        return {text: t.textContent.trim(), top: r.top, bottom: r.bottom, left: r.left, right: r.right};
-    })""")
+    labels_at = page.evaluate("""() => {
+        const snap = window.__skotDebug && window.__skotDebug.getSceneSnapshot && window.__skotDebug.getSceneSnapshot();
+        const app = document.querySelector('[role=application]');
+        if (snap && app) {
+            const r = app.getBoundingClientRect();
+            const v = snap.viewport;
+            return snap.elements.filter(e => e.kind === 'arrow' && e.labelPill).map(e => {
+                const p = e.labelPill;
+                const cx = r.left + v.x + p.x * v.zoom;
+                const cy = r.top + v.y + p.y * v.zoom;
+                const hw = (p.width / 2) * v.zoom;
+                const hh = (p.height / 2) * v.zoom;
+                return {text: p.text, top: cy - hh, bottom: cy + hh, left: cx - hw, right: cx + hw};
+            });
+        }
+        return [...document.querySelectorAll('[role=application] svg [data-element-id][data-kind="arrow"]')].map((g) => {
+            const t = [...g.querySelectorAll('text')].find((n) => n.textContent.trim());
+            const r = t.getBoundingClientRect();
+            return {text: t.textContent.trim(), top: r.top, bottom: r.bottom, left: r.left, right: r.right};
+        });
+    }""")
     assert len(labels_at) == 2, labels_at
     a, b = labels_at
     overlap = not (a["bottom"] <= b["top"] or b["bottom"] <= a["top"] or a["right"] <= b["left"] or b["right"] <= a["left"])

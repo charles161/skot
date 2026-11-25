@@ -10,8 +10,26 @@ from driver import Driver, is_shape
 from test_core_loop import arrows_named, bar_of, board, frozen
 from test_features import SUGGESTIONS, ghosts, read_options, shot
 
-# Points along an arrow as it is drawn on screen: the longest path of its group is the shaft.
+# Points along an arrow as it is drawn on screen: reads canvas snapshot (or falls back to SVG shaft).
 SHAFT_JS = """(sel) => {
+  const snap = window.__skotDebug && window.__skotDebug.getSceneSnapshot && window.__skotDebug.getSceneSnapshot();
+  const app = document.querySelector('[role=application]');
+  if (snap && app) {
+    const r = app.getBoundingClientRect();
+    const v = snap.viewport;
+    const toScreen = ([x, y]) => [r.left + v.x + x * v.zoom, r.top + v.y + y * v.zoom];
+    const idMatch = sel.match(/data-element-id="([^"]+)"/);
+    if (idMatch) {
+      const hit = snap.elements.find(e => e.id === idMatch[1] && e.kind === 'arrow');
+      return hit && hit.arrowPoints ? hit.arrowPoints.map(toScreen) : null;
+    }
+    const fromMatch = sel.match(/data-from="([^"]+)"/);
+    const toMatch = sel.match(/data-to="([^"]+)"/);
+    if (fromMatch && toMatch) {
+      const hit = snap.ghostArrows.find(a => a.fromId === fromMatch[1] && a.toId === toMatch[1]);
+      return hit ? hit.points.map(toScreen) : null;
+    }
+  }
   const g = document.querySelector(sel);
   if (!g) return null;
   const shaft = [...g.querySelectorAll('path')].sort((a, b) => b.getTotalLength() - a.getTotalLength())[0];
@@ -96,6 +114,17 @@ def test_arrows_route_around(page, skot, evidence):
 
 
 ALL_SHAFTS_JS = """() => {
+  const snap = window.__skotDebug && window.__skotDebug.getSceneSnapshot && window.__skotDebug.getSceneSnapshot();
+  const app = document.querySelector('[role=application]');
+  if (snap && app) {
+    const r = app.getBoundingClientRect();
+    const v = snap.viewport;
+    const toScreen = ([x, y]) => [r.left + v.x + x * v.zoom, r.top + v.y + y * v.zoom];
+    return {
+      drawn: snap.elements.filter(e => e.kind === 'arrow').map(e => ({id: e.id, pts: (e.arrowPoints || []).map(toScreen)})),
+      ghost: snap.ghostArrows.map(a => ({from: a.fromId, to: a.toId, pts: a.points.map(toScreen)})),
+    };
+  }
   const sample = (g) => {
     const shaft = [...g.querySelectorAll('path')].sort((a, b) => b.getTotalLength() - a.getTotalLength())[0];
     if (!shaft) return [];
@@ -118,6 +147,29 @@ ALL_SHAFTS_JS = """() => {
 
 # The label of an arrow as drawn on screen: left and right edge of its text, or null when it has none.
 LABEL_EDGES_JS = """(sel) => {
+  const snap = window.__skotDebug && window.__skotDebug.getSceneSnapshot && window.__skotDebug.getSceneSnapshot();
+  const app = document.querySelector('[role=application]');
+  if (snap && app) {
+    const r = app.getBoundingClientRect();
+    const v = snap.viewport;
+    const pillBox = (p) => {
+      if (!p) return null;
+      const cx = r.left + v.x + p.x * v.zoom;
+      const cy = r.top + v.y + p.y * v.zoom;
+      const hw = (p.width / 2) * v.zoom;
+      const hh = (p.height / 2) * v.zoom;
+      return {text: p.text, left: cx - hw, right: cx + hw, top: cy - hh, bottom: cy + hh};
+    };
+    const idMatch = sel.match(/data-element-id="([^"]+)"/);
+    if (idMatch) {
+      const hit = snap.elements.find(e => e.id === idMatch[1]);
+      return pillBox(hit && hit.labelPill);
+    }
+    if (sel.includes('data-ghost-arrow')) {
+      const hit = snap.ghostArrows.find(a => a.labelPill);
+      return pillBox(hit && hit.labelPill);
+    }
+  }
   const g = document.querySelector(sel);
   const t = g && [...g.querySelectorAll('text')].find((n) => n.textContent.trim());
   if (!t) return null;

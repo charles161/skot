@@ -100,15 +100,24 @@ class Driver:
 
     def viewport(self):
         v = self.page.evaluate("""() => {
-            const svg = document.querySelector('[role=application] svg');
+            const app = document.querySelector('[role=application]');
+            if (!app) return null;
+            const r = app.getBoundingClientRect();
+            const dbg = window.__skotDebug && window.__skotDebug.getViewport && window.__skotDebug.getViewport();
+            if (dbg) return {x: dbg.x, y: dbg.y, zoom: dbg.zoom, left: r.left, top: r.top};
+            const raw = app.getAttribute('data-viewport');
+            if (raw) {
+                const [x, y, zoom] = raw.split(',').map(Number);
+                if (Number.isFinite(zoom)) return {x, y, zoom, left: r.left, top: r.top};
+            }
+            const svg = app.querySelector('svg');
             const g = svg && svg.querySelector(':scope > g[transform]');
             if (!g) return null;
             const m = g.getAttribute('transform').match(/translate\\(([-\\d.e]+),\\s*([-\\d.e]+)\\)\\s*scale\\(([-\\d.e]+)\\)/);
-            const r = svg.getBoundingClientRect();
             return m && {x: +m[1], y: +m[2], zoom: +m[3], left: r.left, top: r.top};
         }""")
         if not v:
-            raise DriverError("canvas transform not found: is [role=application] svg > g[transform] still there?")
+            raise DriverError("canvas viewport not found on [role=application]")
         return v
 
     def to_screen(self, wx, wy, v=None):
@@ -122,15 +131,15 @@ class Driver:
     def on_canvas(self, sx, sy):
         return self.page.evaluate("""([x, y]) => {
             const el = document.elementFromPoint(x, y);
-            const svg = document.querySelector('[role=application] svg');
-            return !!(el && svg && svg.contains(el));
+            const app = document.querySelector('[role=application]');
+            return !!(el && app && (el === app || app.contains(el)));
         }""", [sx, sy])
 
     # ---------------- user-like primitives
 
     def wait_board(self, timeout=30000):
         """The board in the address bar is the one on screen."""
-        self.page.wait_for_selector("[role=application] svg", timeout=timeout)
+        self.page.wait_for_selector('[role=application] canvas[data-canvas-layer="static"], [role=application] svg', timeout=timeout)
         self.page.wait_for_function("() => /\\/b\\/[^/]+$/.test(location.pathname)", timeout=timeout)
 
     def new_board(self, starter=None):
@@ -210,6 +219,16 @@ class Driver:
     def rendered(self, el_id):
         """What the canvas drew for one element: its path data and text, in the element's own coordinates."""
         return self.page.evaluate("""id => {
+            const snap = window.__skotDebug && window.__skotDebug.getSceneSnapshot && window.__skotDebug.getSceneSnapshot();
+            if (snap) {
+                const hit = snap.elements.find(e => e.id === id);
+                if (!hit) return null;
+                return {
+                    kind: hit.kind,
+                    paths: hit.paths.map(p => ({d: p.d || '', stroke: p.stroke || null, dash: p.dash || null, end: p.end || null})),
+                    texts: hit.texts,
+                };
+            }
             const g = document.querySelector(`[role=application] svg [data-element-id="${CSS.escape(id)}"]`);
             if (!g) return null;
             const num = (n, a) => parseFloat(n.getAttribute(a));

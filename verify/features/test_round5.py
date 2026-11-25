@@ -172,13 +172,29 @@ def test_fork_cancel_restores_view(page, skot, evidence):
     assert_no_console_errors_but_ai(evidence)
 
 
-LABEL_PILLS_JS = """() => [...document.querySelectorAll('[role=application] svg [data-element-id][data-kind="arrow"]')].map((g) => {
-  const pill = g.querySelector('rect');
-  const text = [...g.querySelectorAll('text')].find((n) => n.textContent.trim());
-  if (!pill || !text) return null;
-  const r = pill.getBoundingClientRect();
-  return {id: g.getAttribute('data-element-id'), text: text.textContent.trim(), left: r.left, right: r.right, top: r.top, bottom: r.bottom};
-}).filter(Boolean)"""
+LABEL_PILLS_JS = """() => {
+  const snap = window.__skotDebug && window.__skotDebug.getSceneSnapshot && window.__skotDebug.getSceneSnapshot();
+  const app = document.querySelector('[role=application]');
+  if (snap && app) {
+    const r = app.getBoundingClientRect();
+    const v = snap.viewport;
+    return snap.elements.filter(e => e.kind === 'arrow' && e.labelPill).map(e => {
+      const p = e.labelPill;
+      const cx = r.left + v.x + p.x * v.zoom;
+      const cy = r.top + v.y + p.y * v.zoom;
+      const hw = (p.width / 2) * v.zoom;
+      const hh = (p.height / 2) * v.zoom;
+      return {id: e.id, text: p.text, left: cx - hw, right: cx + hw, top: cy - hh, bottom: cy + hh};
+    });
+  }
+  return [...document.querySelectorAll('[role=application] svg [data-element-id][data-kind="arrow"]')].map((g) => {
+    const pill = g.querySelector('rect');
+    const text = [...g.querySelectorAll('text')].find((n) => n.textContent.trim());
+    if (!pill || !text) return null;
+    const r = pill.getBoundingClientRect();
+    return {id: g.getAttribute('data-element-id'), text: text.textContent.trim(), left: r.left, right: r.right, top: r.top, bottom: r.bottom};
+  }).filter(Boolean);
+}"""
 
 
 def label_clashes(page, skot):

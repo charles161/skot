@@ -228,7 +228,7 @@ describe("actor (User) and text double-click editing", () => {
     expect(pickEditField(actor, { x: 136, y: 198 })).toBe("sublabel");
   });
 
-  it("handleCanvasDoubleClick resolves findShapeAtPoint before creating a new text element, and actor/text render transparent hit rects", async () => {
+  it("handleCanvasDoubleClick resolves findShapeAtPoint geometrically before creating a new text element", async () => {
     const { readFileSync } = await import("node:fs");
     const path = await import("node:path");
     const canvas = readFileSync(path.resolve(__dirname, "../../components/jev/JevCanvas.tsx"), "utf8");
@@ -236,7 +236,5 @@ describe("actor (User) and text double-click editing", () => {
     expect(fnMatch).not.toBeNull();
     expect(fnMatch![0]).toMatch(/findShapeAtPoint/);
     expect(fnMatch![0]).toMatch(/startDoubleClickEdit/);
-    // actor and text shapes need a transparent bounding hit rect inside their <g>
-    expect(canvas).toMatch(/el\.kind === "actor" \|\| el\.kind === "text"/);
   });
 });

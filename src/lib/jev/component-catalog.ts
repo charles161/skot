@@ -131,13 +131,36 @@ export const NEXT_ROLES: Record<Role, Role[]> = {
   external: ["queue"],
 };
 
-export const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+const NORM_CACHE = new Map<string, string>();
+const NORM_CACHE_MAX = 2048;
+
+export const norm = (s: string): string => {
+  const hit = NORM_CACHE.get(s);
+  if (hit !== undefined) return hit;
+  const out = s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  if (NORM_CACHE.size >= NORM_CACHE_MAX) NORM_CACHE.clear();
+  NORM_CACHE.set(s, out);
+  return out;
+};
+
 export const words = (s: string) => s.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+
+const EXACT_NAME_INDEX: Map<string, Component> = (() => {
+  const map = new Map<string, Component>();
+  for (const c of CATALOG) {
+    const labelKey = norm(c.label);
+    if (labelKey && !map.has(labelKey)) map.set(labelKey, c);
+    for (const alias of c.aliases) {
+      if (alias && !map.has(alias)) map.set(alias, c);
+    }
+  }
+  return map;
+})();
 
 export function componentByExactName(label: string): Component | null {
   const n = norm(label);
   if (!n) return null;
-  return CATALOG.find((c) => norm(c.label) === n || c.aliases.includes(n)) ?? null;
+  return EXACT_NAME_INDEX.get(n) ?? null;
 }
 
 /** What a board label is: the whole label first, then two-word phrases, then its words from the last (head noun). */

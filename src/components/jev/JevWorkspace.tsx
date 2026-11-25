@@ -119,6 +119,7 @@ import {
   createStarterElements,
 } from "@/lib/jev/templates";
 import {
+  BoardTheme,
   ElementBox,
   JevElement,
   JevTelemetry,
@@ -216,6 +217,151 @@ const TOOLS: Array<{
   { id: "text", label: "Text Note", key: toolShortcutLabel("text"), icon: <IconText className="h-4 w-4" /> },
   { id: "markdown", label: "Markdown", key: toolShortcutLabel("markdown"), icon: <IconMarkdown className="h-4 w-4" /> },
 ];
+
+const ToolDockMemo = React.memo(function ToolDockMemo({
+  tool,
+  onSelectTool,
+  onSpawnShape,
+  onOpenPacks,
+}: {
+  tool: ToolType;
+  onSelectTool: (t: ToolType) => void;
+  onSpawnShape: (t: DockTool) => void;
+  onOpenPacks: () => void;
+}) {
+  return (
+    <nav
+      aria-label="Drawing tools"
+      className="jev-glass pointer-events-auto order-3 mx-auto flex max-w-[calc(100vw-24px)] items-center gap-0.5 overflow-x-auto rounded-2xl p-1 shadow-sm sm:order-2 sm:mx-0 sm:max-w-[calc(100vw-420px)] lg:max-w-[calc(100vw-480px)]"
+    >
+      {TOOLS.map((t) => {
+        const active = tool === t.id;
+        return (
+          <Fragment key={t.id}>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label={`${t.label} tool (${t.key})`}
+                    aria-pressed={active}
+                    onClick={() => onSelectTool(t.id)}
+                    onDoubleClick={() => onSpawnShape(t.id)}
+                    className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-8 sm:w-8 ${
+                      active
+                        ? "bg-[#1C2028] text-[#F8F6F1] shadow-xs dark:bg-[#F1EDE4] dark:text-[#11151D]"
+                        : "text-foreground/80 hover:bg-secondary hover:text-foreground"
+                    }`}
+                  />
+                }
+              >
+                <span aria-hidden="true">{t.icon}</span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">
+                {t.label} <span className="ml-1 font-mono opacity-75">{t.key}</span>
+              </TooltipContent>
+            </Tooltip>
+            {t.id === "ellipse" && (
+              <MoreShapesButton tool={tool} onPick={onSelectTool} onOpenPacks={onOpenPacks} />
+            )}
+          </Fragment>
+        );
+      })}
+    </nav>
+  );
+});
+
+const RightStudioControlsMemo = React.memo(function RightStudioControlsMemo({
+  renderStyle,
+  theme,
+  collabEnabled,
+  peerCount,
+  onToggleStyle,
+  onToggleTheme,
+  onOpenShare,
+}: {
+  renderStyle: RenderStyle;
+  theme: BoardTheme;
+  collabEnabled: boolean;
+  peerCount: number;
+  onToggleStyle: () => void;
+  onToggleTheme: () => void;
+  onOpenShare: () => void;
+}) {
+  return (
+    <div className="jev-glass pointer-events-auto order-2 flex max-w-[calc(100vw-24px)] shrink-0 items-center gap-1 rounded-2xl p-1.5 shadow-sm sm:order-3">
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              aria-pressed={renderStyle === "sketch"}
+              aria-label={`Drafting style: ${renderStyle === "sketch" ? "Sketch" : "Clean"}. Switch to ${renderStyle === "sketch" ? "Clean" : "Sketch"}`}
+              onClick={onToggleStyle}
+              className="hidden items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-[11.5px] font-medium text-foreground/85 transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:inline-flex"
+            />
+          }
+        >
+          <IconSpark className="h-3.5 w-3.5 text-[#C2411D] dark:text-[#FF8562]" aria-hidden="true" />
+          {renderStyle === "sketch" ? "Sketch" : "Clean"}
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="text-xs">
+          Toggle hand-drawn RoughJS ink vs crisp vector lines
+        </TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              aria-label={
+                theme === "vellum"
+                  ? "Switch to Midnight Blueprint dark theme"
+                  : "Switch to Studio Vellum light theme"
+              }
+              aria-pressed={theme === "midnight"}
+              onClick={onToggleTheme}
+              className="flex h-9 w-9 items-center justify-center rounded-xl text-foreground/85 transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-8 sm:w-8"
+            />
+          }
+        >
+          {theme === "vellum" ? (
+            <IconMoon className="h-3.5 w-3.5" aria-hidden="true" />
+          ) : (
+            <IconSun className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="text-xs">
+          Switch to {theme === "vellum" ? "Midnight Blueprint" : "Studio Vellum"}
+        </TooltipContent>
+      </Tooltip>
+
+      {collabEnabled && (
+        <button
+          type="button"
+          aria-label={
+            peerCount > 0
+              ? `Peer-to-peer sharing, ${peerCount + 1} peers active`
+              : "Open Peer-to-Peer sharing dialog"
+          }
+          onClick={onOpenShare}
+          className="inline-flex min-h-[36px] items-center gap-1.5 rounded-xl bg-[#0F766E] px-2.5 py-1.5 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-[#0D655E] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-card sm:min-h-0 sm:px-3"
+        >
+          <span className="relative flex h-2 w-2" aria-hidden="true">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-300 opacity-75" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-200" />
+          </span>
+          <IconBroadcast className="hidden h-3.5 w-3.5 sm:block" aria-hidden="true" />
+          <span className="sm:hidden">{peerCount > 0 ? `${peerCount + 1}` : "P2P"}</span>
+          <span className="hidden sm:inline">
+            {peerCount > 0 ? `P2P · ${peerCount + 1}` : "Share P2P"}
+          </span>
+        </button>
+      )}
+    </div>
+  );
+});
 
 const PEER_NAMES = ["Maya", "Soren", "Nadia", "Kavi", "Elena", "Theo"];
 /** Starter boards are large; fit them with slim side margins so text stays legible on a laptop. */
@@ -482,6 +628,15 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   }, []);
 
   const [shareOpen, setShareOpen] = useState(false);
+  const handleToggleRenderStyle = useCallback(
+    () => setRenderStyle((s) => (s === "sketch" ? "clean" : "sketch")),
+    []
+  );
+  const handleToggleTheme = useCallback(
+    () => setTheme(theme === "vellum" ? "midnight" : "vellum"),
+    [setTheme, theme]
+  );
+  const handleOpenShare = useCallback(() => setShareOpen(true), []);
   const [remotePeers, setRemotePeers] = useState<PeerCursor[]>([]);
   const [demoPeerEnabled, setDemoPeerEnabled] = useState(false);
   const [demoPeer, setDemoPeer] = useState<PeerCursor | null>(null);
@@ -1274,7 +1429,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     return predictConcept(text, elements, anchor)?.completion ?? null;
   }, [thoughtPrompt, elements, selectedIds]);
 
-  // Type-ahead: every keystroke shows what Enter will add (option 1, as a ghost) and two bigger options.
+  // Type-ahead: runs off thoughtPrompt with cached catalog normalization (no extra deferred commit pass).
   useEffect(() => {
     const text = thoughtPrompt.trim();
     if (!text || text.startsWith("/") || forkSession || aiQuiet) {
@@ -3534,125 +3689,24 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
           </div>
         </div>
 
-        {/* Center: Tactile Drafting Tool Dock (scrolls cleanly on 390px mobile) */}
-        <nav
-          aria-label="Drawing tools"
-          className="jev-glass pointer-events-auto order-3 mx-auto flex max-w-[calc(100vw-24px)] items-center gap-0.5 overflow-x-auto rounded-2xl p-1 shadow-sm sm:order-2 sm:mx-0 sm:max-w-[calc(100vw-420px)] lg:max-w-[calc(100vw-480px)]"
-        >
-          {TOOLS.map((t) => {
-            const active = tool === t.id;
-            return (
-              <Fragment key={t.id}>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <button
-                        type="button"
-                        aria-label={`${t.label} tool (${t.key})`}
-                        aria-pressed={active}
-                        onClick={() => setTool(t.id)}
-                        onDoubleClick={() => spawnShapeAtCenter(t.id)}
-                        className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-8 sm:w-8 ${
-                          active
-                            ? "bg-[#1C2028] text-[#F8F6F1] shadow-xs dark:bg-[#F1EDE4] dark:text-[#11151D]"
-                            : "text-foreground/80 hover:bg-secondary hover:text-foreground"
-                        }`}
-                      />
-                    }
-                  >
-                    <span aria-hidden="true">{t.icon}</span>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" className="text-xs">
-                    {t.label} <span className="ml-1 font-mono opacity-75">{t.key}</span>
-                  </TooltipContent>
-                </Tooltip>
-                {t.id === "ellipse" && <MoreShapesButton tool={tool} onPick={setTool} onOpenPacks={() => packs.openPanel()} />}
-              </Fragment>
-            );
-          })}
-        </nav>
+        {/* Center: Tactile Drafting Tool Dock (memoized so typing/panning/zooming never re-renders 11 tooltips) */}
+        <ToolDockMemo
+          tool={tool}
+          onSelectTool={setTool}
+          onSpawnShape={spawnShapeAtCenter}
+          onOpenPacks={packs.openPanel}
+        />
 
-        {/* Right: Render Style, Theme & WebRTC P2P */}
-        <div className="jev-glass pointer-events-auto order-2 flex max-w-[calc(100vw-24px)] shrink-0 items-center gap-1 rounded-2xl p-1.5 shadow-sm sm:order-3">
-          {/* Sketch vs Clean drafting style */}
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  aria-pressed={renderStyle === "sketch"}
-                  aria-label={`Drafting style: ${renderStyle === "sketch" ? "Sketch" : "Clean"}. Switch to ${renderStyle === "sketch" ? "Clean" : "Sketch"}`}
-                  onClick={() =>
-                    setRenderStyle((s) => (s === "sketch" ? "clean" : "sketch"))
-                  }
-                  className="hidden items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-[11.5px] font-medium text-foreground/85 transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:inline-flex"
-                />
-              }
-            >
-              <IconSpark className="h-3.5 w-3.5 text-[#C2411D] dark:text-[#FF8562]" aria-hidden="true" />
-              {renderStyle === "sketch" ? "Sketch" : "Clean"}
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">
-              Toggle hand-drawn RoughJS ink vs crisp vector lines
-            </TooltipContent>
-          </Tooltip>
-
-          {/* Studio Vellum vs Midnight Blueprint */}
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  aria-label={
-                    theme === "vellum"
-                      ? "Switch to Midnight Blueprint dark theme"
-                      : "Switch to Studio Vellum light theme"
-                  }
-                  aria-pressed={theme === "midnight"}
-                  onClick={() =>
-                    setTheme(theme === "vellum" ? "midnight" : "vellum")
-                  }
-                  className="flex h-9 w-9 items-center justify-center rounded-xl text-foreground/85 transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-8 sm:w-8"
-                />
-              }
-            >
-              {theme === "vellum" ? (
-                <IconMoon className="h-3.5 w-3.5" aria-hidden="true" />
-              ) : (
-                <IconSun className="h-3.5 w-3.5" aria-hidden="true" />
-              )}
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">
-              Switch to {theme === "vellum" ? "Midnight Blueprint" : "Studio Vellum"}
-            </TooltipContent>
-          </Tooltip>
-
-          {/* Live WebRTC P2P Button */}
-          {collabEnabled && (
-          <button
-            type="button"
-            aria-label={
-              allPeers.length > 0
-                ? `Peer-to-peer sharing, ${allPeers.length + 1} peers active`
-                : "Open Peer-to-Peer sharing dialog"
-            }
-            onClick={() => setShareOpen(true)}
-            className="inline-flex min-h-[36px] items-center gap-1.5 rounded-xl bg-[#0F766E] px-2.5 py-1.5 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-[#0D655E] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-card sm:min-h-0 sm:px-3"
-          >
-            <span className="relative flex h-2 w-2" aria-hidden="true">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-300 opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-200" />
-            </span>
-            <IconBroadcast className="hidden h-3.5 w-3.5 sm:block" aria-hidden="true" />
-            <span className="sm:hidden">
-              {allPeers.length > 0 ? `${allPeers.length + 1}` : "P2P"}
-            </span>
-            <span className="hidden sm:inline">
-              {allPeers.length > 0 ? `P2P · ${allPeers.length + 1}` : "Share P2P"}
-            </span>
-          </button>
-          )}
-        </div>
+        {/* Right: Render Style, Theme & WebRTC P2P (memoized so typing/zooming never re-renders tooltips) */}
+        <RightStudioControlsMemo
+          renderStyle={renderStyle}
+          theme={theme}
+          collabEnabled={collabEnabled}
+          peerCount={allPeers.length}
+          onToggleStyle={handleToggleRenderStyle}
+          onToggleTheme={handleToggleTheme}
+          onOpenShare={handleOpenShare}
+        />
       </header>
 
       <BoardNoticeToast notice={boardNotice.notice} onDismiss={boardNotice.dismiss} />
@@ -4023,52 +4077,60 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         </button>
       </div>
 
-      {/* PEER-TO-PEER WEBRTC COLLABORATION MODAL */}
-      <ShareP2PDialog
-        open={shareOpen}
-        onOpenChange={setShareOpen}
-        roomId={roomId}
-        roomSecret={roomSecret}
-        peers={allPeers}
-        webrtcPeers={collabStatus.webrtcPeers}
-        broadcastPeers={collabStatus.broadcastPeers}
-        demoPeerEnabled={demoPeerEnabled}
-        onToggleDemoPeer={setDemoPeerEnabled}
-        onCreateManualOffer={async () => {
-          if (!collabRef.current) throw new Error("Session not ready");
-          return collabRef.current.createManualOfferCode();
-        }}
-        onAcceptManualOffer={async (code) => {
-          if (!collabRef.current) throw new Error("Session not ready");
-          return collabRef.current.acceptManualOfferAndCreateAnswer(code);
-        }}
-        onCompleteManualAnswer={async (code) => {
-          if (!collabRef.current) throw new Error("Session not ready");
-          await collabRef.current.completeManualAnswer(code);
-        }}
-      />
+      {/* PEER-TO-PEER WEBRTC COLLABORATION & WORKSPACE MODALS (mounted only when open so closed portals never re-render on typing) */}
+      {shareOpen && (
+        <ShareP2PDialog
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          roomId={roomId}
+          roomSecret={roomSecret}
+          peers={allPeers}
+          webrtcPeers={collabStatus.webrtcPeers}
+          broadcastPeers={collabStatus.broadcastPeers}
+          demoPeerEnabled={demoPeerEnabled}
+          onToggleDemoPeer={setDemoPeerEnabled}
+          onCreateManualOffer={async () => {
+            if (!collabRef.current) throw new Error("Session not ready");
+            return collabRef.current.createManualOfferCode();
+          }}
+          onAcceptManualOffer={async (code) => {
+            if (!collabRef.current) throw new Error("Session not ready");
+            return collabRef.current.acceptManualOfferAndCreateAnswer(code);
+          }}
+          onCompleteManualAnswer={async (code) => {
+            if (!collabRef.current) throw new Error("Session not ready");
+            await collabRef.current.completeManualAnswer(code);
+          }}
+        />
+      )}
 
-      <RestoreCopyDialog
-        open={restoreCopyOpen}
-        onOpenChange={setRestoreCopyOpen}
-        getStorage={getBrowserStorage}
-        roomId={roomId}
-        onRestore={restoreCopy}
-      />
+      {restoreCopyOpen && (
+        <RestoreCopyDialog
+          open={restoreCopyOpen}
+          onOpenChange={setRestoreCopyOpen}
+          getStorage={getBrowserStorage}
+          roomId={roomId}
+          onRestore={restoreCopy}
+        />
+      )}
 
-      <MyBoardsDialog
-        open={myBoardsOpen}
-        onOpenChange={setMyBoardsOpen}
-        current={{ id: roomId, title: boardTitle, count: elements.length }}
-        onLeave={boardPage.leave}
-      />
+      {myBoardsOpen && (
+        <MyBoardsDialog
+          open={myBoardsOpen}
+          onOpenChange={setMyBoardsOpen}
+          current={{ id: roomId, title: boardTitle, count: elements.length }}
+          onLeave={boardPage.leave}
+        />
+      )}
 
-      <PracticePicker
-        open={practicePickerOpen}
-        onOpenChange={setPracticePickerOpen}
-        boardHasContent={elements.length > 0}
-        onStart={startPractice}
-      />
+      {practicePickerOpen && (
+        <PracticePicker
+          open={practicePickerOpen}
+          onOpenChange={setPracticePickerOpen}
+          boardHasContent={elements.length > 0}
+          onStart={startPractice}
+        />
+      )}
     </div>
     </AiQuietContext>
   );

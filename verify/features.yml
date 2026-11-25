@@ -434,6 +434,41 @@ features:
     sources:
       - src/components/jev/JevCanvas.tsx
 
+  - id: dblclick-edits-node
+    title: "Real use 25 Nov: double-clicking any node edits its text wherever the pointer lands in its box, also when
+      the hand moves a pixel, on a stick-figure user and on an existing text note; it never starts a new note"
+    check: dblclick-edits-node
+    sources:
+      - src/components/jev/JevCanvas.tsx
+
+  - id: wheel-zoom-follows-input
+    title: "Real use 25 Nov: every wheel and pinch event zooms, at full speed and under a 4x CPU slowdown"
+    check: wheel-zoom-follows-input
+    sources:
+      - src/components/jev/JevCanvas.tsx
+
+  - id: render-budget-zoom
+    title: "Real use 25 Nov: a wheel tick re-renders at most 20 React components on a 59-element board"
+    check: render-budget-zoom
+    sources:
+      - src/components/jev/JevCanvas.tsx
+      - src/components/jev/JevWorkspace.tsx
+
+  - id: render-budget-typing
+    title: "Real use 25 Nov: a Thought Bar keystroke re-renders at most 150 React components on a 59-element board"
+    check: render-budget-typing
+    sources:
+      - src/components/jev/ThoughtBar.tsx
+      - src/components/jev/JevWorkspace.tsx
+
+  - id: render-budget-drag
+    title: "Real use 25 Nov: a pointer move while dragging a node re-renders at most 60 React components on a
+      59-element board"
+    check: render-budget-drag
+    sources:
+      - src/components/jev/JevCanvas.tsx
+      - src/components/jev/JevWorkspace.tsx
+
   - id: select-drag
     title: Dragging a node moves it and ends on release even over other UI; a marquee drag selects several nodes
     check: select-drag

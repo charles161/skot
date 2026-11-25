@@ -30,7 +30,7 @@ def raw_board(skot):
 
 def reopen(page):
     page.reload(wait_until="load")
-    page.wait_for_selector("[role=application] svg", timeout=30000)
+    page.wait_for_selector('[role=application] canvas[data-canvas-layer="static"], [role=application] svg', timeout=30000)
     page.wait_for_timeout(1500)
 
 
@@ -46,7 +46,11 @@ def seed(skot, elements):
 
 
 def drawn(page):
-    return page.locator("[data-element-id]").count()
+    return page.evaluate("""() => {
+        const snap = window.__skotDebug && window.__skotDebug.getSceneSnapshot && window.__skotDebug.getSceneSnapshot();
+        if (snap) return snap.elements.length;
+        return document.querySelectorAll('[data-element-id]').length;
+    }""")
 
 
 def type_node(skot, label):
@@ -116,7 +120,7 @@ def test_board_stuck_recovers(page, skot, evidence):
     # 2. Morph text saved over the limit by the old build.
     skot.new_board()
     page.reload()  # a second board in this context: make sure the new room is the one loaded
-    page.wait_for_selector("[role=application] svg", timeout=30000)
+    page.wait_for_selector('[role=application] canvas[data-canvas-layer="static"], [role=application] svg', timeout=30000)
     over = {"groupId": "g1", "notation": "er", "groupRecord": {
         "groupId": "g1", "anchorBounds": {"x": 0, "y": 0, "width": 400, "height": 200},
         "spec": {"summary": "s" * 400, "actors": [], "messages": [], "steps": [], "states": [], "transitions": [],
@@ -144,7 +148,7 @@ def test_board_stuck_recovers(page, skot, evidence):
     with open(download.value.path(), encoding="utf-8") as f:
         assert f.read() == broken, "the download is not the saved copy"
     panel.get_by_role("button", name="Start a new board").click()
-    page.wait_for_selector("[role=application] svg", timeout=30000)
+    page.wait_for_selector('[role=application] canvas[data-canvas-layer="static"], [role=application] svg', timeout=30000)
     page.wait_for_function("k => !location.pathname.endsWith(k) && /\\/b\\//.test(location.pathname)",
                            arg=key[len("jev_board_"):])
     assert "jev_board_" + skot.room_id() != key, "the new board reused the stuck board's room"

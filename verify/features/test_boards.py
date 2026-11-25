@@ -17,7 +17,11 @@ with open(os.path.join(REPO, "src", "lib", "jev", "__fixtures__", "prod-storage-
     PROD = json.load(f)
 TITLE = "Board title"
 PHONE = {"width": 390, "height": 844}
-HAS = "l => (document.querySelector('[role=application] svg')?.textContent || '').includes(l)"
+HAS = """l => {
+  const snap = window.__skotDebug && window.__skotDebug.getSceneSnapshot && window.__skotDebug.getSceneSnapshot();
+  if (snap) return snap.elements.some(e => (e.label || '').includes(l) || (e.sublabel || '').includes(l) || e.texts.some(t => (t.text || '').includes(l)));
+  return (document.querySelector('[role=application] svg')?.textContent || '').includes(l);
+}"""
 STORAGE = "() => Object.fromEntries(Object.keys(localStorage).map(k => [k, localStorage.getItem(k)]))"
 THEIR_ID, THEIR_KEY = "A" * 22, "b" * 32
 
@@ -611,7 +615,7 @@ def test_board_unknown(page, app, prod_like, evidence, shot):
         page.goto(prod_like + link)
         unknown.wait_for(timeout=20000)
         assert "saved in the browser they were made in" in unknown.inner_text()
-        assert not page.locator("[role=application] svg").count(), "an empty board passes for the sender's"
+        assert not page.locator('[role=application] canvas[data-canvas-layer="static"], [role=application] svg').count(), "an empty board passes for the sender's"
         page.keyboard.type("probe")
         page.wait_for_timeout(700)
         assert page.evaluate(STORAGE) == before, "%s created storage" % link
