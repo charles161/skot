@@ -45,6 +45,7 @@ def test_hint_never_lies(page, skot, evidence, ai):
     still read "Connect API Gateway? Enter accepts" / "Enter adds API Gateway" while Enter did nothing."""
     ai(page, "ok")
     skot.new_board()
+    skot.set_suggestions_mode("full")
     type_enter(page, "app")
     type_enter(page, "api gateway")
     board(skot, 2)
@@ -88,6 +89,7 @@ def test_hint_never_lies(page, skot, evidence, ai):
 def test_enter_needs_pick(page, skot, evidence, ai):
     ai(page, "ok")
     skot.new_board()
+    skot.set_suggestions_mode("full")
 
     # 1. One node on the board: nothing to connect. Enter, Enter, Enter must not add nodes nobody typed.
     type_enter(page, "app")
@@ -351,6 +353,7 @@ def test_flow_both_ways(page, skot, evidence):
     A typed flow is drawn as typed, the way back included; a flow that is already there says so on screen."""
     page.route("**/api/jev/decide", lambda r: r.fulfill(status=500, content_type="application/json", body='{"error":"off"}'))
     skot.new_board()
+    skot.set_suggestions_mode("full")
     bar_of(page).click()
     page.keyboard.type("web -> queue", delay=25)
     page.keyboard.press("Enter")

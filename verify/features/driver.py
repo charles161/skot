@@ -296,6 +296,16 @@ class Driver:
     def zoom(self):
         return self.viewport()["zoom"]
 
+    def set_suggestions_mode(self, mode):
+        """Switch blank-board Suggestions mode via the real top-bar control ('type-only' | 'full' | 'off')."""
+        btn = self.page.get_by_test_id("suggestions-mode-btn")
+        btn.wait_for(state="visible", timeout=8000)
+        btn.click()
+        opt = self.page.get_by_test_id("suggestions-opt-" + mode)
+        opt.wait_for(state="visible", timeout=5000)
+        opt.click()
+        self.page.wait_for_timeout(150)
+
     def suggestions_region(self):
         return self.page.locator('[role=region][aria-label="Predictive drafting suggestions"]')
 

@@ -219,6 +219,7 @@ def test_arrows_route_stack(browser, server, base_url, evidence):
     skot = Driver(page, base_url)
     try:
         skot.new_board()
+        skot.set_suggestions_mode("full")
         bar_of(page).tap()
         names = ["app", "api gateway", "auth service", "redis", "postgres", "kafka", "worker", "object storage"]
         seen, skipping, labelled = [], 0, 0

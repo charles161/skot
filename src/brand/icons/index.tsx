@@ -216,6 +216,14 @@ export function IconClose(props: IconProps) {
   );
 }
 
+export function IconMenu(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M4.5 7h15M4.5 12h15M4.5 17h15" />
+    </Icon>
+  );
+}
+
 export function IconChevronRight(props: IconProps) {
   return (
     <Icon {...props}>

@@ -693,6 +693,22 @@ features:
       - src/components/jev/ShareP2PDialog.tsx
       - src/lib/jev/room-auth.ts
 
+  - id: ux-blank-board-type-only-default
+    title: "Blank boards default to Type only (no unsolicited ghost next boxes); Tab asks on demand; Full and Off persist"
+    check: ux-blank-board-type-only-default
+    prod: true
+    sources:
+      - src/lib/jev/suggestion-mode.ts
+      - src/components/jev/JevWorkspace.tsx
+
+  - id: ux-topbar-menu-and-practice
+    title: "Explicit hamburger Board menu button separated from Skot wordmark (My boards) plus top-bar Practice pill"
+    check: ux-topbar-menu-and-practice
+    prod: true
+    sources:
+      - src/components/jev/JevWorkspace.tsx
+      - src/brand/icons/index.tsx
+
 internal:
   - path: src/app/api/health/route.ts
     reason: Ops health probe; the gate uses it to wait for `next start`, nobody sees it.

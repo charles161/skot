@@ -2,6 +2,7 @@
 // need an absolute og:image, PNG icons, a favicon.ico and a web manifest. Also: a visible "Beta" badge.
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { inflateSync } from "node:zlib";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildSiteMetadata, DEFAULT_SITE_URL, resolveSiteUrl } from "@/brand/brand";
@@ -74,6 +75,73 @@ describe("link preview metadata", () => {
 describe("platform images", () => {
   it("ships a 1200x630 PNG link preview image", () => {
     expect(pngSize(path.join(PUBLIC, "og.png"))).toEqual({ width: 1200, height: 630 });
+  });
+
+  it("keeps the bright Skot hero wordmark inside the center 630x630 WhatsApp square safe crop", () => {
+    const buf = readFileSync(path.join(PUBLIC, "og.png"));
+    const width = buf.readUInt32BE(16);
+    const height = buf.readUInt32BE(20);
+    const bitDepth = buf[24];
+    const colorType = buf[25];
+    expect(bitDepth).toBe(8);
+    expect([2, 6]).toContain(colorType);
+    const bpp = colorType === 6 ? 4 : 3;
+
+    // Collect IDAT chunks and decode PNG scanlines
+    const idats: Buffer[] = [];
+    let pos = 8;
+    while (pos < buf.length) {
+      const len = buf.readUInt32BE(pos);
+      const type = buf.subarray(pos + 4, pos + 8).toString("ascii");
+      if (type === "IDAT") idats.push(buf.subarray(pos + 8, pos + 8 + len));
+      pos += 12 + len;
+    }
+    const raw = inflateSync(Buffer.concat(idats));
+    const stride = width * bpp;
+    const pixels = Buffer.alloc(height * stride);
+    const paeth = (a: number, b: number, c: number) => {
+      const p = a + b - c;
+      const pa = Math.abs(p - a);
+      const pb = Math.abs(p - b);
+      const pc = Math.abs(p - c);
+      return pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+    };
+    for (let y = 0; y < height; y++) {
+      const filter = raw[y * (stride + 1)];
+      const srcOff = y * (stride + 1) + 1;
+      const dstOff = y * stride;
+      for (let i = 0; i < stride; i++) {
+        const x = raw[srcOff + i];
+        const a = i >= bpp ? pixels[dstOff + i - bpp] : 0;
+        const b = y > 0 ? pixels[dstOff - stride + i] : 0;
+        const c = y > 0 && i >= bpp ? pixels[dstOff - stride + i - bpp] : 0;
+        let val = x;
+        if (filter === 1) val = (x + a) & 0xff;
+        else if (filter === 2) val = (x + b) & 0xff;
+        else if (filter === 3) val = (x + ((a + b) >> 1)) & 0xff;
+        else if (filter === 4) val = (x + paeth(a, b, c)) & 0xff;
+        pixels[dstOff + i] = val;
+      }
+    }
+
+    // Bright wordmark pixels (luminance > 210) must sit inside the center 630x630 crop (x in [295, 905])
+    let minBrightX = width;
+    let maxBrightX = 0;
+    let brightCount = 0;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = y * stride + x * bpp;
+        const lum = 0.299 * pixels[idx] + 0.587 * pixels[idx + 1] + 0.114 * pixels[idx + 2];
+        if (lum > 210) {
+          brightCount++;
+          if (x < minBrightX) minBrightX = x;
+          if (x > maxBrightX) maxBrightX = x;
+        }
+      }
+    }
+    expect(brightCount).toBeGreaterThan(500);
+    expect(minBrightX, `bright hero pixels start at x=${minBrightX}, clipped by WhatsApp square crop (left edge 285)`).toBeGreaterThanOrEqual(295);
+    expect(maxBrightX, `bright hero pixels end at x=${maxBrightX}, clipped by WhatsApp square crop (right edge 915)`).toBeLessThanOrEqual(905);
   });
 
   it("ships PNG icons: apple-touch 180 (file convention), 192 and 512", () => {

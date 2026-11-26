@@ -42,7 +42,7 @@ interface ThoughtBarProps {
   onClear: () => void;
   /** Tab with text: complete the word first, then cycle the three options. */
   onTypedTab?: (reverse: boolean) => void;
-  onEmptyTab?: (reverse?: boolean) => void;
+  onEmptyTab?: (reverse?: boolean) => boolean | void;
   onEmptyEnter?: () => void;
   /** Esc with an empty bar while suggestions are open: dismiss them and keep typing. */
   onEmptyEscape?: () => void;
@@ -132,10 +132,16 @@ export function ThoughtBar({
         onTypedTab(e.shiftKey);
         return;
       }
-      if (!hasText && hasPredictions && onEmptyTab) {
-        e.preventDefault();
-        onEmptyTab(e.shiftKey);
-        return;
+      if (!hasText && onEmptyTab) {
+        if (hasPredictions) {
+          e.preventDefault();
+          onEmptyTab(e.shiftKey);
+          return;
+        }
+        if (onEmptyTab(e.shiftKey) === true) {
+          e.preventDefault();
+          return;
+        }
       }
     }
 

@@ -24,6 +24,7 @@ def test_first_connection_makes_sense(page, skot, evidence, browser, server, bas
     Postgres"; on a phone "object storage" was first offered "Postgres writes to Object Storage"."""
     page.route("**/api/jev/decide", AI_OFF)
     skot.new_board()
+    skot.set_suggestions_mode("full")
     type_enter(page, "app")
     type_enter(page, "postgres")
     board(skot, 2)
@@ -68,6 +69,7 @@ def test_first_connection_makes_sense(page, skot, evidence, browser, server, bas
     try:
         d = Driver(phone, base_url)
         d.new_board()
+        d.set_suggestions_mode("full")
         bar_of(phone).tap()
         names = ["app", "api gateway", "auth service", "redis", "postgres", "kafka", "worker", "object storage"]
         for i, name in enumerate(names, 1):
@@ -221,6 +223,7 @@ def test_labels_stay_clear(page, skot, evidence, browser, server, base_url):
     """18A. Seen on prod: on a 14-node board the label of Kafka -> Search sat on the label of Client -> CDN."""
     page.route("**/api/jev/decide", AI_OFF)
     skot.new_board()
+    skot.set_suggestions_mode("full")
     bar_of(page).click()
     names = ["client", "cdn", "load balancer", "api gateway", "auth service", "user service", "postgres", "redis",
              "kafka", "worker", "s3", "search", "postgres", "notification service"]
@@ -257,6 +260,7 @@ def test_labels_stay_clear(page, skot, evidence, browser, server, base_url):
     try:
         d = Driver(phone, base_url)
         d.new_board()
+        d.set_suggestions_mode("full")
         bar_of(phone).tap()
         for i, name in enumerate(["app", "api gateway", "auth service", "redis", "postgres", "kafka", "worker", "object storage"], 1):
             phone.keyboard.type(name, delay=15)
@@ -293,6 +297,7 @@ def test_click_shows_options_at_once(page, skot, evidence, new_page, base_url):
         p.route("**/api/jev/decide", AI_OFF)
         d = Driver(p, base_url)
         d.new_board()
+        d.set_suggestions_mode("full")
         type_enter(p, "app")
         type_enter(p, "cdn")
         p.keyboard.press("Enter")

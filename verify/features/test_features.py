@@ -227,6 +227,7 @@ def test_write_to_draw(page, skot, evidence):
 @check("ghost-predictions")
 def test_ghost_predictions(page, skot, evidence):
     skot.new_board()
+    skot.set_suggestions_mode("full")
     skot.add("box", "Web App", skot.to_world(400, 260))
     before = skot.suggestion_titles()
     assert len(before) == 3, "expected three predictions after adding a node, got %s" % before
@@ -394,6 +395,7 @@ def assert_ghost_matches(seen, board, existing_labels, typed=False):
 def test_next_options_typed(page, skot, evidence):
     mode = ai_mode(page)
     skot.new_board()
+    skot.set_suggestions_mode("full")
     cd = skot.add("box", "Client Dashboard", skot.to_world(380, 260))
     skot.clear()
     type_into_bar(page, "apigateway")
@@ -430,6 +432,7 @@ def test_next_options_typed(page, skot, evidence):
 def test_next_options_app(page, skot, evidence):
     mode = ai_mode(page)
     skot.new_board()
+    skot.set_suggestions_mode("full")
     app = skot.add("box", "App", skot.to_world(380, 260))
     skot.clear()
     type_into_bar(page, "api gateway")
@@ -449,6 +452,7 @@ def test_next_options_app(page, skot, evidence):
 def test_next_options_blank(page, skot, evidence):
     mode = ai_mode(page)
     skot.new_board()
+    skot.set_suggestions_mode("full")
     type_into_bar(page, "url shortener")
     opts = read_options(page)
     shot(page, evidence, "next-options-blank", "typed")
@@ -476,6 +480,7 @@ def test_next_options_blank(page, skot, evidence):
 def test_next_options_multi(page, skot, evidence):
     mode = ai_mode(page)
     skot.new_board()
+    skot.set_suggestions_mode("full")
     x, y = skot.to_world(360, 220)
     co = skot.add("box", "Checkout", (x, y))
     inv = skot.add("box", "Inventory", (x, y + 260))
@@ -509,6 +514,7 @@ def test_next_options_multi(page, skot, evidence):
 def test_next_options_node(page, skot, evidence):
     mode = ai_mode(page)
     skot.new_board()
+    skot.set_suggestions_mode("full")
     x, y = skot.to_world(260, 300)
     skot.add("box", "Client", (x, y))
     skot.add("box", "API", (x + 330, y))
@@ -538,6 +544,7 @@ def test_next_options_node(page, skot, evidence):
 def test_type_tab_enter(page, skot, evidence):
     mode = ai_mode(page)
     skot.new_board()
+    skot.set_suggestions_mode("full")
     cd = skot.add("box", "Client Dashboard", skot.to_world(380, 260))
     skot.clear()
     bar = page.get_by_role("textbox", name=THOUGHT_BAR)
@@ -588,6 +595,7 @@ def test_type_tab_enter(page, skot, evidence):
 @check("context-suggestions-single")
 def test_context_suggestions_single(page, skot, evidence):
     skot.new_board("checkout")
+    skot.set_suggestions_mode("full")
     skot.clear()
     skot.click_element("Ledger DB")
     hint = page.get_by_text(re.compile(r'Next from "Ledger DB"'))
@@ -603,6 +611,7 @@ def test_context_suggestions_single(page, skot, evidence):
 @check("context-suggestions-multi")
 def test_context_suggestions_multi(page, skot, evidence):
     skot.new_board("checkout")
+    skot.set_suggestions_mode("full")
     skot.select("Checkout API", "Ledger DB")
     page.get_by_text("Predictions for 2 selected nodes").wait_for(state="visible", timeout=10000)
     titles = [s["title"] for s in skot.suggestion_titles()]
@@ -647,6 +656,7 @@ def skot_label(skot, el_id):
 @check("pen-strokes")
 def test_pen_strokes(page, skot, evidence):
     skot.new_board()
+    skot.set_suggestions_mode("full")
     x, y = skot.to_world(300, 260)
     skot.add("box", "Orders", (x, y))
     skot.add("database", "Orders DB", (x + 450, y))
@@ -1730,6 +1740,7 @@ def test_no_emoji_icons(page, skot, evidence, server):
         open_fork_takes(page, skot, "Latency")
         scans["fork_panel"] = page.evaluate(SCAN_UI_JS)
         skot.new_board("checkout")
+        skot.set_suggestions_mode("full")
         skot.clear()
         skot.click_element("Ledger DB")
         page.locator(SUGGESTIONS).wait_for(state="visible", timeout=10000)

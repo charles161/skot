@@ -2,15 +2,27 @@
 
 import { boardStorageKey } from "@/lib/jev/storage-keys";
 import { BrandWordmark } from "@/brand/BrandWordmark";
-import React, { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
 import { AiQuietContext, postDecide } from "@/lib/jev/ai-quiet";
 import { getPracticePrompt, type PracticePromptId } from "@/lib/jev/practice-prompts";
 import type { ReviewComment } from "@/lib/jev/practice-review";
 import { parsePracticeSession, practiceStorageKey, startPracticeSession, storePracticeSession, type PracticeSession } from "@/lib/jev/practice-session";
 import { useBoardTheme } from "@/lib/theme-store";
-import { IconActor, IconArrow, IconBox, IconBroadcast, IconClose, IconDatabase, IconDiamond, IconDownload, IconFit, IconFork, IconFrame, IconHand, IconLayers, IconMarkdown, IconMinus, IconMoon, IconPacks, IconPen, IconPlus, IconRedo, IconReset, IconSelect, IconSpark, IconSun, IconTarget, IconText, IconTrash, IconUndo } from "@/brand/icons";
+import { IconActor, IconArrow, IconBox, IconBroadcast, IconCheck, IconClose, IconDatabase, IconDiamond, IconDownload, IconFit, IconFork, IconFrame, IconHand, IconLayers, IconMarkdown, IconMenu, IconMinus, IconMoon, IconPacks, IconPen, IconPlus, IconRedo, IconReset, IconSelect, IconSpark, IconSun, IconTarget, IconText, IconTrash, IconUndo, IconWand } from "@/brand/icons";
 import { newBoardPath } from "@/lib/jev/boards";
+import {
+  SUGGESTION_MODE_META,
+  allowsOnDemandSuggestions,
+  allowsProactiveSuggestions,
+  allowsTypedCompletion,
+  allowsTypedMultiOptions,
+  getSuggestionModeServerSnapshot,
+  getSuggestionModeSnapshot,
+  saveSuggestionMode,
+  subscribeSuggestionMode,
+  type SuggestionMode,
+} from "@/lib/jev/suggestion-mode";
 import { fitMarkdownNodeSize, resolveClipboardMarkdown } from "@/lib/jev/markdown";
 import {
   DropdownMenu,
@@ -276,6 +288,9 @@ const RightStudioControlsMemo = React.memo(function RightStudioControlsMemo({
   theme,
   collabEnabled,
   peerCount,
+  aiQuiet,
+  suggestionMode,
+  onSetSuggestionMode,
   onToggleStyle,
   onToggleTheme,
   onOpenShare,
@@ -284,12 +299,57 @@ const RightStudioControlsMemo = React.memo(function RightStudioControlsMemo({
   theme: BoardTheme;
   collabEnabled: boolean;
   peerCount: number;
+  aiQuiet: boolean;
+  suggestionMode: SuggestionMode;
+  onSetSuggestionMode: (mode: SuggestionMode) => void;
   onToggleStyle: () => void;
   onToggleTheme: () => void;
   onOpenShare: () => void;
 }) {
   return (
     <div className="jev-glass pointer-events-auto order-2 flex max-w-[calc(100vw-24px)] shrink-0 items-center gap-1 rounded-2xl p-1.5 shadow-sm sm:order-3">
+      {!aiQuiet && (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            data-testid="suggestions-mode-btn"
+            aria-label={`Suggestions: ${SUGGESTION_MODE_META[suggestionMode].label}`}
+            title={`Suggestions: ${SUGGESTION_MODE_META[suggestionMode].label}`}
+            className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-xl px-2 py-1.5 text-[11.5px] font-medium transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0 sm:px-2.5 ${
+              suggestionMode === "full"
+                ? "bg-[#D94E28]/12 text-[#C2411D] dark:text-[#FF8562]"
+                : suggestionMode === "off"
+                  ? "text-muted-foreground"
+                  : "text-foreground/85"
+            }`}
+          >
+            <IconWand className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span className="hidden md:inline">{SUGGESTION_MODE_META[suggestionMode].shortLabel}</span>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-72 rounded-xl p-1.5">
+            {(["type-only", "full", "off"] as SuggestionMode[]).map((mode) => {
+              const meta = SUGGESTION_MODE_META[mode];
+              const active = suggestionMode === mode;
+              return (
+                <DropdownMenuItem
+                  key={mode}
+                  data-testid={`suggestions-opt-${mode}`}
+                  onClick={() => onSetSuggestionMode(mode)}
+                  className="flex items-start gap-2 rounded-lg px-2.5 py-2 text-xs"
+                >
+                  <span className="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[#C2411D] dark:text-[#FF8562]">
+                    {active && <IconCheck className="h-3.5 w-3.5" aria-hidden="true" />}
+                  </span>
+                  <span className="flex flex-col gap-0.5">
+                    <span className="font-semibold text-foreground">{meta.label}</span>
+                    <span className="text-[11px] leading-snug text-muted-foreground">{meta.description}</span>
+                  </span>
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+
       <Tooltip>
         <TooltipTrigger
           render={
@@ -752,6 +812,27 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   useEffect(() => {
     aiQuietRef.current = aiQuiet;
   }, [aiQuiet]);
+
+  const suggestionMode = useSyncExternalStore(
+    subscribeSuggestionMode,
+    getSuggestionModeSnapshot,
+    getSuggestionModeServerSnapshot
+  );
+  const suggestionModeRef = useRef<SuggestionMode>(suggestionMode);
+  useEffect(() => {
+    suggestionModeRef.current = suggestionMode;
+  }, [suggestionMode]);
+  const handleSetSuggestionMode = useCallback((nextMode: SuggestionMode) => {
+    suggestionModeRef.current = nextMode;
+    saveSuggestionMode(getBrowserStorage(), nextMode);
+    if (nextMode !== "full") {
+      decideAbortRef.current?.abort();
+      rankAskRef.current?.cancel();
+      setPredictions([]);
+      setIntent(null);
+      setActivePredIdx(NO_OPTION);
+    }
+  }, []);
 
   const rankWithTypeSafeJev = useCallback(
     async (
@@ -1433,17 +1514,28 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
 
   /** What Tab completes the typed text to; the same concept the options are built from. */
   const completion = useMemo(() => {
+    if (!allowsTypedCompletion(suggestionMode, aiQuiet)) return null;
     const text = thoughtPrompt.trim();
     if (!text) return null;
     if (isFlowText(text)) return null;
     const anchor = typingAnchor(elements, text, selectedIds);
     return predictConcept(text, elements, anchor)?.completion ?? null;
-  }, [thoughtPrompt, elements, selectedIds]);
+  }, [thoughtPrompt, elements, selectedIds, suggestionMode, aiQuiet]);
 
   // Type-ahead: runs off thoughtPrompt with cached catalog normalization (no extra deferred commit pass).
   useEffect(() => {
     const text = thoughtPrompt.trim();
     if (!text || text.startsWith("/") || forkSession || aiQuiet) {
+      if (typedModeRef.current) {
+        typedModeRef.current = false;
+        typedResultRef.current = null;
+        typedTextRef.current = "";
+        setPredictions([]);
+        setIntent(null);
+      }
+      return;
+    }
+    if (!allowsTypedMultiOptions(suggestionMode, aiQuiet)) {
       if (typedModeRef.current) {
         typedModeRef.current = false;
         typedResultRef.current = null;
@@ -1476,7 +1568,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     const keepMinimal = completedRef.current;
     completedRef.current = false;
     presentNextOptions(result, elementsRef.current, { keepMinimal, ask: false, highlight: 0 });
-  }, [thoughtPrompt, elements, selectedIds, forkSession, aiQuiet, presentNextOptions]);
+  }, [thoughtPrompt, elements, selectedIds, forkSession, aiQuiet, suggestionMode, presentNextOptions]);
 
   const updateElements = useCallback(
     (
@@ -1579,6 +1671,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
       rankOpts: { mergeContext?: boolean } = {}
     ) => {
       if (aiQuietRef.current) return;
+      if (!allowsProactiveSuggestions(suggestionModeRef.current, aiQuietRef.current)) return;
       setIntent(nextIntent);
       const storage = getBrowserStorage();
       const profile = loadFeedbackProfile(storage);
@@ -1631,6 +1724,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
   useEffect(() => {
     showSelectionPredictionsRef.current = (key, signal) => {
       if (aiQuietRef.current) return;
+      if (!allowsProactiveSuggestions(suggestionModeRef.current, aiQuietRef.current)) return;
       if (signal.aborted || typedModeRef.current) return;
       const els = elementsRef.current;
       const result = buildNextOptions({ elements: els, selectedIds: key.split("|"), viewportCenter: viewportCenterRef.current });
@@ -1641,11 +1735,16 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
 
   /** Tiered next steps for the node the user just added, applied or renamed. */
   const presentSubjectOptions = useCallback(
-    (subjectId: string, els: JevElement[]) => {
+    (subjectId: string, els: JevElement[], onDemand = false) => {
       lastTouchedIdRef.current = subjectId;
+      if (!onDemand && !allowsProactiveSuggestions(suggestionModeRef.current, aiQuietRef.current)) {
+        setPredictions([]);
+        setIntent(null);
+        return;
+      }
       const result = buildNextOptions({ elements: els, subjectId, viewportCenter: viewportCenterRef.current });
       if (result) {
-        presentNextOptions(result, els);
+        presentNextOptions(result, els, onDemand ? { highlight: 0 } : {});
       } else {
         // Nothing more to suggest here: the hint of the suggestions that were on screen goes with them.
         setPredictions([]);
@@ -1663,9 +1762,14 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
    * the usual next steps. The order is the board's; jev only marks its pick.
    */
   const presentAfterCreate = useCallback(
-    (nodeId: string, anchorIds: string[], els: JevElement[], userPicked = false, offerEnter = true) => {
+    (nodeId: string, anchorIds: string[], els: JevElement[], userPicked = false, offerEnter = true, onDemand = false) => {
       lastTouchedIdRef.current = nodeId;
       if (aiQuietRef.current) return;
+      if (!onDemand && !allowsProactiveSuggestions(suggestionModeRef.current, aiQuietRef.current)) {
+        setPredictions([]);
+        setIntent(null);
+        return;
+      }
       const result = buildAfterCreateOptions({
         elements: els,
         nodeId,
@@ -1680,10 +1784,32 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         return;
       }
       // Enter takes the node's first offered connection, once. After that its other connections wait for Tab.
-      presentNextOptions(result, els, { highlight: offerEnter ? enterDefaultIndex(result.options, nodeId) : NO_OPTION });
+      presentNextOptions(result, els, {
+        highlight: onDemand ? 0 : offerEnter ? enterDefaultIndex(result.options, nodeId) : NO_OPTION,
+      });
     },
     [presentNextOptions]
   );
+
+  /** Explicit user request (Tab on empty bar/canvas) in Type-only or Full mode. */
+  const requestOnDemandSuggestions = useCallback((): boolean => {
+    if (!allowsOnDemandSuggestions(suggestionModeRef.current, aiQuietRef.current)) return false;
+    const els = elementsRef.current;
+    const shapes = els.filter((e) => e.kind !== "arrow" && e.kind !== "freedraw");
+    if (shapes.length === 0) return false;
+    const target =
+      (selectedIds.length > 0 ? shapes.find((s) => s.id === selectedIds[0]) : undefined) ??
+      (lastTouchedIdRef.current ? shapes.find((s) => s.id === lastTouchedIdRef.current) : undefined) ??
+      shapes[shapes.length - 1];
+    if (!target) return false;
+    const wired = els.some((e) => e.kind === "arrow" && (e.fromId === target.id || e.toId === target.id));
+    if (!wired && shapes.length > 1) {
+      presentAfterCreate(target.id, [], els, false, false, true);
+    } else {
+      presentSubjectOptions(target.id, els, true);
+    }
+    return true;
+  }, [selectedIds, presentAfterCreate, presentSubjectOptions]);
 
   /** Text in the Thought Bar ends a Fork It preview: the user has moved on to naming a node. */
   const changeThought = useCallback(
@@ -1773,6 +1899,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         : [...elementsRef.current, stroke];
       const res = generateStrokePredictions(stroke, latest, { boardTitle: boardTitleRef.current });
       if (!res || aiQuietRef.current) return;
+      if (!allowsProactiveSuggestions(suggestionModeRef.current, aiQuietRef.current)) return;
       // The stroke's own reading (connect, shape, lasso) is the order: the feedback profile must not reshuffle it.
       decideAbortRef.current?.abort();
       setIntent(res.intent);
@@ -3014,11 +3141,15 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
         }
       }
 
-      // Tab cycles through the 3 predictions
+      // Tab cycles through the 3 predictions, or asks for suggestions on demand in Type-only mode
       if (e.key === "Tab" && predictions.length > 0) {
         e.preventDefault();
         optionsTouchedRef.current = true;
         setActivePredIdx((idx) => stepOption(idx, predictions.length, e.shiftKey));
+        return;
+      }
+      if (e.key === "Tab" && !e.shiftKey && predictions.length === 0 && !isOnMenuButton(e) && requestOnDemandSuggestions()) {
+        e.preventDefault();
         return;
       }
 
@@ -3162,6 +3293,7 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
     fitToView,
     zoomViewportAtCenter,
     aiQuiet,
+    requestOnDemandSuggestions,
   ]);
 
   const handleCursorMove = useCallback(
@@ -3540,14 +3672,16 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
 
       {/* TOP FLOATING STUDIO BAR */}
       <header className="pointer-events-none fixed inset-x-0 top-0 z-20 flex flex-wrap items-center justify-between gap-2 p-3 sm:flex-nowrap sm:items-start sm:p-4">
-        {/* Left: Skot Wordmark & Board Menu */}
-        <div className="jev-glass pointer-events-auto order-1 flex max-w-[calc(100vw-24px)] shrink-0 items-center gap-2 rounded-2xl px-3 py-1.5 shadow-sm">
+        {/* Left: Explicit ≡ Menu, Skot Wordmark, Boards, New & Practice */}
+        <div className="jev-glass pointer-events-auto order-1 flex max-w-[calc(100vw-24px)] shrink-0 items-center gap-1.5 rounded-2xl px-2 py-1.5 shadow-sm sm:gap-2 sm:px-2.5">
           <DropdownMenu>
             <DropdownMenuTrigger
+              data-testid="topbar-menu-btn"
               aria-label="Board menu"
-              className="flex min-h-[36px] items-center gap-2 rounded-xl pr-1.5 text-left outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0"
+              title="Board menu (export, starters, practice, packs)"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-foreground/85 outline-none transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring sm:h-8 sm:w-8"
             >
-              <BrandWordmark />
+              <IconMenu className="h-4 w-4" aria-hidden="true" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-56 rounded-xl">
               <BoardsMenuItems
@@ -3608,6 +3742,20 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
           </DropdownMenu>
           {boardFile.fileInput}
 
+          <button
+            type="button"
+            data-testid="topbar-brand-btn"
+            aria-label="Skot — My boards"
+            title="Open My boards"
+            onClick={() => {
+              boardPage.save();
+              setMyBoardsOpen(true);
+            }}
+            className="flex min-h-[36px] items-center gap-2 rounded-xl px-1 text-left outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0"
+          >
+            <BrandWordmark />
+          </button>
+
           <span className="h-4 w-px bg-border" aria-hidden="true" />
 
           <div className="flex items-center gap-1">
@@ -3635,6 +3783,22 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
             >
               <IconPlus className="h-3.5 w-3.5" aria-hidden="true" />
               <span>New</span>
+            </button>
+            <button
+              type="button"
+              data-testid="topbar-practice-btn"
+              onClick={() => setPracticePickerOpen(true)}
+              aria-label="Practice"
+              aria-pressed={practice !== null}
+              title="Practice a timed HLD problem with AI review at the end"
+              className={`hidden min-h-[34px] items-center gap-1 rounded-xl px-2 py-1 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:inline-flex sm:min-h-0 ${
+                practice !== null
+                  ? "bg-[#0F766E]/15 text-[#0F766E] dark:text-emerald-300"
+                  : "text-foreground/85 hover:bg-secondary hover:text-foreground"
+              }`}
+            >
+              <IconTarget className="h-3.5 w-3.5" aria-hidden="true" />
+              <span className="hidden xl:inline">Practice</span>
             </button>
           </div>
 
@@ -3708,12 +3872,15 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
           onOpenPacks={packs.openPanel}
         />
 
-        {/* Right: Render Style, Theme & WebRTC P2P (memoized so typing/zooming never re-renders tooltips) */}
+        {/* Right: Suggestions Mode, Render Style, Theme & WebRTC P2P */}
         <RightStudioControlsMemo
           renderStyle={renderStyle}
           theme={theme}
           collabEnabled={collabEnabled}
           peerCount={allPeers.length}
+          aiQuiet={aiQuiet}
+          suggestionMode={suggestionMode}
+          onSetSuggestionMode={handleSetSuggestionMode}
           onToggleStyle={handleToggleRenderStyle}
           onToggleTheme={handleToggleTheme}
           onOpenShare={handleOpenShare}
@@ -4009,10 +4176,14 @@ export function JevWorkspace({ packChips = true, collabEnabled = true }: JevWork
                     : (prev.activeIndex + 1) % len,
                 };
               });
-              return;
+              return true;
+            }
+            if (predictions.length === 0) {
+              return !reverse ? requestOnDemandSuggestions() : false;
             }
             optionsTouchedRef.current = true;
             setActivePredIdx((idx) => stepOption(idx, predictions.length, Boolean(reverse)));
+            return true;
           }}
           onEmptyEnter={() => {
             if (forkSession?.phase === "pressure") {

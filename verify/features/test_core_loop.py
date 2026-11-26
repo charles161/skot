@@ -231,6 +231,7 @@ def test_core_loop_placement(page, skot, new_page, evidence, base_url, ai):
 def test_core_loop_connections_suggested(page, skot, evidence, ai):
     ai(page, "ok")  # jev answers and prefers the last option: the highlight must stay where it is
     skot.new_board()
+    skot.set_suggestions_mode("full")
     type_enter(page, "app")
     type_enter(page, "api gateway")
     els = board(skot, 2)
@@ -287,6 +288,7 @@ def test_core_loop_connections_suggested(page, skot, evidence, ai):
 def loop_result(page, skot, settle_ms):
     """app, api gateway, postgres, app again, then Enter on the empty bar (accept the first suggestion)."""
     skot.new_board()
+    skot.set_suggestions_mode("full")
     for name in ["app", "api gateway", "postgres", "app"]:
         added, ms = type_enter(page, name, settle_ms=settle_ms)
         assert added == 1 and ms is not None and ms < 400, "%r: added %s in %s ms" % (name, added, ms)
@@ -347,6 +349,8 @@ def test_core_loop_keyboard(page, skot, evidence, ai):
     evidence.events.clear()
     skot.new_board()
     assert bar_of(page).evaluate("el => el === document.activeElement"), "the Thought Bar should have the caret when the board opens"
+    skot.set_suggestions_mode("full")
+    bar_of(page).focus()
     page.keyboard.type("app", delay=25)
     page.keyboard.press("Enter")
     board(skot, 1)

@@ -37,6 +37,7 @@ def test_type_anywhere(page, skot, evidence):
     page.route("**/api/jev/decide", lambda r: r.fulfill(status=500, content_type="application/json", body="{}"))
     evidence.events.clear()
     skot.new_board()
+    skot.set_suggestions_mode("full")
     # Third judge, prod: empty board, click the canvas, type app, Enter: nothing, and the Pen tool was on.
     page.mouse.click(150, 450)
     page.keyboard.type("app", delay=30)
@@ -163,6 +164,7 @@ def test_ai_on_demand(page, skot, evidence):
         route.fulfill(status=200, content_type="application/json", body=json.dumps(answer))
     page.route("**/api/jev/decide", handle)
     skot.new_board()
+    skot.set_suggestions_mode("full")
 
     bar_of(page).click()
     page.keyboard.type("app", delay=60)
@@ -268,6 +270,7 @@ def test_phone_chips(browser, server, base_url, evidence):
     skot = Driver(page, base_url)
     try:
         skot.new_board()
+        skot.set_suggestions_mode("full")
         bar_of(page).tap()
         for name in ["app", "api gateway"]:
             page.keyboard.type(name, delay=25)
