@@ -83,6 +83,7 @@ def test_call_budget(page, skot, evidence):
     page.add_init_script("(%s)()" % WATCH_DECIDE)
     page.route("**/api/jev/decide", handle)
     skot.new_board()
+    skot.set_suggestions_mode("full")
 
     # 1. The prod board, drawn with the tools as fast as the driver goes, then Fork at once.
     for shape, label, at in BOARD_NODES:

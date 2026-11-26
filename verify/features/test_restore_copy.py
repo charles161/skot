@@ -107,6 +107,7 @@ def test_restore_earlier_copy(page, skot, evidence, shot):
     assert storage(skot, "before_restore") is None, "opening the list saved a copy"
 
     # By keyboard alone, with a node selected: Enter on the Board menu opens it rather than renaming the node.
+    skot.set_suggestions_mode("full")
     skot.click_element("Leftover")
     skot.suggestions_region().wait_for(timeout=10000)
     page.keyboard.press("Escape")  # takes the suggestions away, not the selection
@@ -167,6 +168,7 @@ def test_restore_earlier_copy(page, skot, evidence, shot):
 @check("restore-copy-tolerant")
 def test_restore_copy_tolerant(page, skot, evidence, shot):
     skot.new_board()
+    skot.set_suggestions_mode("full")
     type_node(skot, "Leftover")
     broken = {"id": "rec_broken", "savedAt": 2, "snapshot": {"elements": [{"id": "cut short"}]}}
     put(skot, "recovery", [broken, saved_copy(1, [element(i) for i in range(501)])])
