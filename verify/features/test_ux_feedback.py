@@ -8,6 +8,15 @@ from test_features import SUGGESTIONS, THOUGHT_BAR, ghosts, read_options, shot
 
 @check("ux-blank-board-type-only-default")
 def test_ux_blank_board_type_only_default(page, skot, evidence):
+    # Keep prod-subset runs deterministic and zero-AI-cost while exercising real local suggestions + UI mode switch
+    page.route(
+        "**/api/jev/decide",
+        lambda r: r.fulfill(
+            status=200,
+            content_type="application/json",
+            body='{"source":"heuristic","model":"heuristic","isHeuristic":true,"latencyMs":0,"nextActionProbabilities":null,"contextSuggestions":[]}',
+        ),
+    )
     skot.new_board()
     btn = page.get_by_test_id("suggestions-mode-btn")
     btn.wait_for(state="visible", timeout=8000)
@@ -50,9 +59,11 @@ def test_ux_blank_board_type_only_default(page, skot, evidence):
 
     # 4. Switching to Full persists across reload and re-enables proactive next-box suggestions
     skot.set_suggestions_mode("full")
-    page.reload(wait_until="domcontentloaded")
-    page.get_by_test_id("suggestions-mode-btn").wait_for(state="visible", timeout=10000)
-    assert "Full" in (page.get_by_test_id("suggestions-mode-btn").get_attribute("aria-label") or "")
+    page.reload(wait_until="load")
+    page.wait_for_function(
+        """() => (document.querySelector('[data-testid="suggestions-mode-btn"]')?.getAttribute('aria-label') || '').includes('Full')""",
+        timeout=10000,
+    )
     bar = page.get_by_role("textbox", name=THOUGHT_BAR)
     bar.click()
     bar.fill("Postgres")
